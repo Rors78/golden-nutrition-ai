@@ -47,8 +47,14 @@ Smart fitness and nutrition tracking app with AI-powered insights. Built with St
 
 ### Requirements
 
-```bash
+**Windows:**
+```powershell
 pip install streamlit pandas plotly
+```
+
+**Linux/macOS:**
+```bash
+pip3 install streamlit pandas plotly
 ```
 
 ### Dependencies
