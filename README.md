@@ -22,24 +22,26 @@ Smart fitness and nutrition tracking app with AI-powered insights. Built with St
 - Requires Claude API credentials (see Installation); everything else in the app works without them
 
 ### 🍽️ Meal Tracker
-- Log meals with protein and calorie counts
-- Date/time tracking
-- Optional notes for each meal
-- View and manage last 7 days of meals
-- Delete individual meals
+- Full macros: protein, calories, carbs, fat, and fiber per meal
+- ⭐ Quick Add: re-log any recent meal with one click
+- Date/time tracking and optional notes
+- Edit the last 7 days inline — change cells, add rows, or delete rows right in the table
 
 ### 🏋️ Workout Logger
 - Pre-loaded Cutler Mode workout templates (Push/Pull/Legs)
-- Track duration and intensity
-- Custom workout support
-- Detailed exercise notes
+- Structured exercise logging: sets, reps, and weight per exercise
+- 📈 Progression tracking per exercise: all-time PR, best-day volume, top-weight and volume charts over time
+- Track duration, intensity, and notes
 - 7-day workout history
 
 ### 💊 Supplement Tracker
-- Log daily supplements (multivitamin, protein, creatine, etc.)
-- Track time of day taken
-- Mark missed supplements
-- Weekly supplement history
+- ✅ Daily checklist: define your daily stack once, then tick off each supplement as you take it
+- Manual logging with time of day and missed-supplement tracking
+- Edit this week's history inline
+
+### 💾 Data
+- One-click CSV export of meals, workouts, supplements, and weigh-ins (sidebar)
+- All data in a local `nutrition_data.json` you own
 
 ### 🧠 AI Auto-Adjust Engine
 - Weekly averages (protein per meal, calories, meals per day)
@@ -225,6 +227,17 @@ Edit the app to customize:
 ## 🎉 Spring Ready!
 
 Perfect timing to start tracking for spring goals. Log meals and workouts daily, let the AI guide your adjustments, and watch your progress compound week after week.
+
+## 🧪 Development
+
+Run the test suite (end-to-end app tests via Streamlit's AppTest — no API key needed):
+
+```bash
+pip install pytest
+python -m pytest tests/ -v
+```
+
+Tests also run automatically on every push and pull request via GitHub Actions.
 
 ## 📄 License
 
