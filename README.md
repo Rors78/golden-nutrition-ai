@@ -77,15 +77,20 @@ pip3 install -r requirements.txt
 - **plotly** - Interactive charts
 - **anthropic** - Claude API SDK (for the AI features)
 
-### Claude API setup (for AI features)
+### Claude setup (for AI features)
 
-The AI Quick Log and Coaching Summary use the Claude API (model: Claude Opus 5). Set your API key before launching:
+The AI Quick Log and Coaching Summary need a Claude backend. Two options, tried in this order:
 
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...   # from https://platform.claude.com
-```
+1. **Claude Code (recommended if you have a Claude Pro/Max subscription — no extra cost).**
+   Install [Claude Code](https://claude.com/claude-code), log in once, and the app
+   automatically routes AI calls through `claude -p` on your subscription.
 
-(or run `ant auth login` if you use the Anthropic CLI). Without credentials, the rest of the app works normally and the AI buttons show a setup hint.
+2. **Anthropic API key (pay-as-you-go credits).**
+   ```bash
+   export ANTHROPIC_API_KEY=sk-ant-...   # from https://platform.claude.com (requires a credit balance)
+   ```
+
+Without either, the rest of the app works normally and the AI buttons show a setup hint.
 
 ## 📱 Usage
 
