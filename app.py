@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import copy
+import anthropic
 import pandas as pd
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -8,6 +9,7 @@ import plotly.express as px
 
 # Configuration
 DATA_FILE = Path("nutrition_data.json")
+CLAUDE_MODEL = "claude-opus-5"
 
 DEFAULT_DATA = {
     'profile': {
@@ -19,7 +21,8 @@ DEFAULT_DATA = {
     },
     'meals': [],
     'workouts': [],
-    'supplements': []
+    'supplements': [],
+    'weights': []
 }
 
 # Page config
@@ -31,7 +34,9 @@ def load_data():
     if DATA_FILE.exists():
         try:
             with open(DATA_FILE, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            data.setdefault('weights', [])
+            return data
         except (json.JSONDecodeError, OSError):
             backup = DATA_FILE.with_name(DATA_FILE.name + '.corrupt')
             DATA_FILE.replace(backup)
@@ -52,6 +57,109 @@ def save_data():
     tmp.replace(DATA_FILE)
 
 
+# ---------------------------------------------------------------------------
+# Claude AI helpers
+# ---------------------------------------------------------------------------
+
+MEAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "meals": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Short name for the meal or food item"},
+                    "protein": {"type": "integer", "description": "Estimated protein in grams"},
+                    "calories": {"type": "integer", "description": "Estimated calories"}
+                },
+                "required": ["name", "protein", "calories"],
+                "additionalProperties": False
+            }
+        }
+    },
+    "required": ["meals"],
+    "additionalProperties": False
+}
+
+
+@st.cache_resource
+def get_claude_client():
+    # Resolves credentials from ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
+    # or an `ant auth login` profile
+    return anthropic.Anthropic()
+
+
+def _claude_create(**kwargs):
+    """Call the Messages API with server-side refusal fallbacks when available."""
+    client = get_claude_client()
+    try:
+        return client.beta.messages.create(
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            **kwargs,
+        )
+    except TypeError:
+        # Older SDK without the fallbacks parameter — plain call
+        return client.messages.create(**kwargs)
+
+
+def parse_meals_with_ai(description):
+    """Turn a plain-language meal description into structured macro estimates."""
+    response = _claude_create(
+        model=CLAUDE_MODEL,
+        max_tokens=16000,
+        system=(
+            "You are a nutrition expert. The user describes food they ate in plain "
+            "language. Break it into individual meals/items and estimate protein (g) "
+            "and calories for each, assuming realistic typical portion sizes unless "
+            "quantities are given. Round to sensible whole numbers."
+        ),
+        messages=[{"role": "user", "content": description}],
+        output_config={"format": {"type": "json_schema", "schema": MEAL_SCHEMA}},
+    )
+    if response.stop_reason == "refusal":
+        raise RuntimeError("Claude declined to process this description.")
+    text = next(b.text for b in response.content if b.type == "text")
+    return json.loads(text)["meals"]
+
+
+def generate_coaching_summary(week_data):
+    """Ask Claude for a weekly coaching summary based on tracked data."""
+    response = _claude_create(
+        model=CLAUDE_MODEL,
+        max_tokens=16000,
+        system=(
+            "You are Golden Nutrition AI, an expert fitness and nutrition coach for a "
+            "dedicated lifter following a push/pull/legs program. Be direct, specific, "
+            "and use the actual numbers from the data. Keep it under 400 words."
+        ),
+        messages=[{
+            "role": "user",
+            "content": (
+                "Here is my last 7 days of tracking data as JSON:\n\n"
+                f"{json.dumps(week_data, indent=2)}\n\n"
+                "Give me a weekly coaching summary in markdown with three sections: "
+                "**What went well**, **What to fix**, and **The one change for next week** "
+                "(the single highest-impact adjustment)."
+            ),
+        }],
+    )
+    if response.stop_reason == "refusal":
+        raise RuntimeError("Claude declined to process this request.")
+    return next(b.text for b in response.content if b.type == "text")
+
+
+def show_ai_error(e):
+    if isinstance(e, anthropic.AuthenticationError):
+        st.error(
+            "No valid Claude API credentials found. Set the ANTHROPIC_API_KEY "
+            "environment variable (or run `ant auth login`), then restart the app."
+        )
+    else:
+        st.error(f"AI request failed: {e}")
+
+
 # Header
 st.title("🏋️ Golden Nutrition AI")
 st.subheader("Smart Fitness & Nutrition Tracking")
@@ -63,8 +171,8 @@ with st.sidebar:
     profile = st.session_state.user_data['profile']
 
     name = st.text_input("Name", value=profile.get('name', ''))
-    weight = st.number_input("Current Weight (lbs)", min_value=0, value=profile.get('weight', 0), step=1)
-    goal_weight = st.number_input("Goal Weight (lbs)", min_value=0, value=profile.get('goal_weight', 0), step=1)
+    weight = st.number_input("Current Weight (lbs)", min_value=0, value=int(profile.get('weight', 0)), step=1)
+    goal_weight = st.number_input("Goal Weight (lbs)", min_value=0, value=int(profile.get('goal_weight', 0)), step=1)
     daily_protein = st.number_input("Daily Protein Goal (g)", min_value=0, value=profile.get('daily_protein_g', 150), step=5)
     daily_calories = st.number_input("Daily Calorie Goal", min_value=0, value=profile.get('daily_calories', 2000), step=100)
 
@@ -80,8 +188,9 @@ with st.sidebar:
         st.success("Profile saved!")
 
 # Main tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab_weight, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Dashboard",
+    "⚖️ Weight",
     "🍽️ Meal Tracker",
     "🏋️ Workout Log",
     "💊 Supplements",
@@ -152,9 +261,165 @@ with tab1:
     else:
         st.info("No workouts logged today")
 
+# TAB: Weight Tracker
+with tab_weight:
+    st.header("⚖️ Weight Tracker")
+
+    saved_profile = st.session_state.user_data['profile']
+    weights = st.session_state.user_data.setdefault('weights', [])
+
+    col1, col2 = st.columns(2)
+    with col1:
+        weigh_date = st.date_input("Date", value=date.today(), key="weigh_date")
+        default_weight = float(saved_profile.get('weight') or 0) or 200.0
+        weigh_lbs = st.number_input("Weight (lbs)", min_value=0.0, value=default_weight, step=0.5, key="weigh_lbs")
+
+    if st.button("Log Weigh-In"):
+        if weigh_lbs <= 0:
+            st.error("Please enter a weight above 0.")
+        else:
+            # One entry per day — a re-log replaces that day's entry
+            weights[:] = [w for w in weights if w['date'] != weigh_date.isoformat()]
+            weights.append({'date': weigh_date.isoformat(), 'weight': weigh_lbs})
+            weights.sort(key=lambda w: w['date'])
+            # Keep the profile's current weight in sync with the latest weigh-in
+            st.session_state.user_data['profile']['weight'] = weights[-1]['weight']
+            save_data()
+            st.success(f"Logged: {weigh_lbs} lbs")
+            st.rerun()
+
+    if weights:
+        current = weights[-1]['weight']
+        goal = saved_profile.get('goal_weight', 0)
+
+        # Change over the last 7 days: compare to the oldest entry within the window
+        week_ago = (date.today() - timedelta(days=7)).isoformat()
+        window = [w for w in weights if w['date'] >= week_ago]
+        change_7d = current - window[0]['weight'] if len(window) > 1 else None
+
+        # Trend from the last 30 days of entries
+        month_ago = (date.today() - timedelta(days=30)).isoformat()
+        trend_window = [w for w in weights if w['date'] >= month_ago]
+        rate_per_week = None
+        if len(trend_window) > 1:
+            first, last = trend_window[0], trend_window[-1]
+            days_span = (date.fromisoformat(last['date']) - date.fromisoformat(first['date'])).days
+            if days_span > 0:
+                rate_per_week = (last['weight'] - first['weight']) / days_span * 7
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            # When cutting, a negative change is good news
+            good_direction = "inverse" if (goal and goal < current) else "normal"
+            st.metric("Current Weight", f"{current:.1f} lbs",
+                      delta=f"{change_7d:+.1f} lbs (7d)" if change_7d is not None else None,
+                      delta_color=good_direction)
+        with col2:
+            if goal:
+                st.metric("To Goal", f"{abs(current - goal):.1f} lbs",
+                          help=f"Goal: {goal} lbs (set in Profile)")
+            else:
+                st.metric("To Goal", "—", help="Set a goal weight in the Profile sidebar")
+        with col3:
+            st.metric("Trend", f"{rate_per_week:+.1f} lbs/week" if rate_per_week is not None else "—",
+                      help="Based on the last 30 days of weigh-ins")
+
+        # Projected goal date from the current trend
+        if goal and rate_per_week is not None and abs(rate_per_week) >= 0.05:
+            to_go = goal - current
+            if to_go == 0:
+                st.success("🎯 You're at your goal weight!")
+            elif (to_go < 0) == (rate_per_week < 0):
+                days_needed = abs(to_go / (rate_per_week / 7))
+                eta = date.today() + timedelta(days=round(days_needed))
+                st.info(f"📅 At your current rate of {rate_per_week:+.1f} lbs/week, "
+                        f"you'll reach {goal} lbs around **{eta.strftime('%B %d, %Y')}** "
+                        f"({round(days_needed)} days).")
+            else:
+                st.warning(f"⚠️ Your current trend ({rate_per_week:+.1f} lbs/week) is moving "
+                           f"away from your goal of {goal} lbs.")
+
+        # Weight chart
+        df_w = pd.DataFrame(weights)
+        df_w.columns = ['Date', 'Weight']
+        fig = px.line(df_w, x='Date', y='Weight', markers=True,
+                      title='Weight Over Time', labels={'Weight': 'Weight (lbs)'})
+        if goal:
+            fig.add_hline(y=goal, line_dash="dash", annotation_text=f"Goal: {goal} lbs",
+                          line_color="green")
+        st.plotly_chart(fig, width="stretch")
+
+        # History with delete mode
+        st.markdown("### Weigh-In History")
+        st.dataframe(df_w.sort_values('Date', ascending=False), width="stretch")
+
+        if st.checkbox("Delete mode", key="weight_delete_mode"):
+            recent_desc = list(reversed(weights))
+            weigh_to_delete = st.selectbox("Select weigh-in to delete",
+                                          range(len(recent_desc)),
+                                          format_func=lambda x: f"{recent_desc[x]['date']} - {recent_desc[x]['weight']} lbs")
+            if st.button("Delete Selected Weigh-In"):
+                weights.remove(recent_desc[weigh_to_delete])
+                if weights:
+                    st.session_state.user_data['profile']['weight'] = weights[-1]['weight']
+                save_data()
+                st.success("Weigh-in deleted")
+                st.rerun()
+    else:
+        st.info("No weigh-ins yet. Log your first one above — daily weigh-ins give the best trend data.")
+
 # TAB 2: Meal Tracker
 with tab2:
     st.header("🍽️ Log Meal")
+
+    # AI quick log
+    st.markdown("### 🤖 AI Quick Log")
+    st.caption("Describe what you ate in plain language — Claude estimates the macros. Entries are logged with today's date and the current time.")
+
+    ai_desc = st.text_input("What did you eat?",
+                            placeholder="e.g., chicken burrito with rice and beans, and a protein shake",
+                            key="ai_meal_desc")
+    if st.button("Estimate with AI"):
+        if not ai_desc.strip():
+            st.error("Describe what you ate first.")
+        else:
+            with st.spinner("Asking Claude..."):
+                try:
+                    st.session_state.ai_parsed_meals = parse_meals_with_ai(ai_desc.strip())
+                except Exception as e:
+                    show_ai_error(e)
+
+    if st.session_state.get('ai_parsed_meals'):
+        parsed = st.session_state.ai_parsed_meals
+        st.dataframe(pd.DataFrame(parsed), width="stretch")
+        total_p = sum(m['protein'] for m in parsed)
+        total_c = sum(m['calories'] for m in parsed)
+        st.caption(f"Total: {total_p}g protein, {total_c} calories")
+
+        col_add, col_discard = st.columns(2)
+        with col_add:
+            if st.button("✅ Add All to Log"):
+                now = datetime.now().time().strftime("%H:%M")
+                for m in parsed:
+                    st.session_state.user_data['meals'].append({
+                        'date': date.today().isoformat(),
+                        'time': now,
+                        'name': m['name'],
+                        'protein': m['protein'],
+                        'calories': m['calories'],
+                        'notes': 'Estimated by Claude'
+                    })
+                save_data()
+                del st.session_state.ai_parsed_meals
+                st.success(f"Added {len(parsed)} meal(s)")
+                st.rerun()
+        with col_discard:
+            if st.button("❌ Discard"):
+                del st.session_state.ai_parsed_meals
+                st.rerun()
+
+    st.markdown("---")
+    st.markdown("### Manual Entry")
 
     col1, col2 = st.columns(2)
 
@@ -365,6 +630,33 @@ with tab5:
     week_ago = (date.today() - timedelta(days=7)).isoformat()
     recent_meals = [m for m in st.session_state.user_data['meals'] if m['date'] >= week_ago]
     recent_workouts = [w for w in st.session_state.user_data['workouts'] if w['date'] >= week_ago]
+    recent_weights = [w for w in st.session_state.user_data.get('weights', []) if w['date'] >= week_ago]
+
+    # Claude coaching summary
+    st.markdown("### 🎓 Claude Coaching Summary")
+    st.caption("A weekly review of your data by Claude — what went well, what to fix, and the one change to make next week.")
+
+    if st.button("Generate Coaching Summary"):
+        if not recent_meals and not recent_workouts:
+            st.error("Log some meals or workouts first — there's no data from the last 7 days to review.")
+        else:
+            week_data = {
+                'profile': st.session_state.user_data['profile'],
+                'meals': recent_meals,
+                'workouts': recent_workouts,
+                'supplements': [s for s in st.session_state.user_data['supplements'] if s['date'] >= week_ago],
+                'weigh_ins': recent_weights,
+            }
+            with st.spinner("Claude is reviewing your week..."):
+                try:
+                    st.session_state.coaching_summary = generate_coaching_summary(week_data)
+                except Exception as e:
+                    show_ai_error(e)
+
+    if st.session_state.get('coaching_summary'):
+        st.markdown(st.session_state.coaching_summary)
+
+    st.markdown("---")
 
     # Calculate averages
     if recent_meals:
