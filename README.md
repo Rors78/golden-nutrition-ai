@@ -9,6 +9,18 @@ Smart fitness and nutrition tracking app with AI-powered insights. Built with St
 - Progress bars showing goal completion
 - Recent activity feed
 
+### ⚖️ Weight Tracker
+- Log daily weigh-ins (one entry per day)
+- Weight-over-time chart with your goal line
+- 7-day change and lbs/week trend
+- Projected date you'll hit your goal weight at the current rate
+- Latest weigh-in automatically updates your profile weight
+
+### 🤖 Claude AI (real AI, powered by the Claude API)
+- **AI Quick Log** — describe what you ate in plain language ("chicken burrito and a protein shake") and Claude estimates protein and calories for each item; review and add to your log in one click
+- **Coaching Summary** — Claude reviews your last 7 days of meals, workouts, supplements, and weigh-ins and gives you a coaching write-up: what went well, what to fix, and the one highest-impact change for next week
+- Requires Claude API credentials (see Installation); everything else in the app works without them
+
 ### 🍽️ Meal Tracker
 - Log meals with protein and calorie counts
 - Date/time tracking
@@ -61,6 +73,17 @@ pip3 install -r requirements.txt
 - **streamlit** - Web app framework
 - **pandas** - Data analysis
 - **plotly** - Interactive charts
+- **anthropic** - Claude API SDK (for the AI features)
+
+### Claude API setup (for AI features)
+
+The AI Quick Log and Coaching Summary use the Claude API (model: Claude Opus 5). Set your API key before launching:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...   # from https://platform.claude.com
+```
+
+(or run `ant auth login` if you use the Anthropic CLI). Without credentials, the rest of the app works normally and the AI buttons show a setup hint.
 
 ## 📱 Usage
 
