@@ -49,12 +49,12 @@ Smart fitness and nutrition tracking app with AI-powered insights. Built with St
 
 **Windows:**
 ```powershell
-pip install streamlit pandas plotly
+pip install -r requirements.txt
 ```
 
 **Linux/macOS:**
 ```bash
-pip3 install streamlit pandas plotly
+pip3 install -r requirements.txt
 ```
 
 ### Dependencies
@@ -205,7 +205,7 @@ Perfect timing to start tracking for spring goals. Log meals and workouts daily,
 
 ## 📄 License
 
-Personal use only.
+MIT — see the [LICENSE](LICENSE) file.
 
 ---
 

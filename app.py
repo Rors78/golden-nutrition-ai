@@ -1,40 +1,56 @@
 import streamlit as st
 import json
+import copy
 import pandas as pd
 from datetime import datetime, date, timedelta
 from pathlib import Path
-import plotly.graph_objects as go
 import plotly.express as px
 
 # Configuration
 DATA_FILE = Path("nutrition_data.json")
 
+DEFAULT_DATA = {
+    'profile': {
+        'name': '',
+        'weight': 0,
+        'goal_weight': 0,
+        'daily_protein_g': 150,
+        'daily_calories': 2000
+    },
+    'meals': [],
+    'workouts': [],
+    'supplements': []
+}
+
 # Page config
 st.set_page_config(page_title="Golden Nutrition AI", layout="wide", page_icon="🏋️")
 
+
+def load_data():
+    """Load user data, recovering gracefully from a corrupted file."""
+    if DATA_FILE.exists():
+        try:
+            with open(DATA_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            backup = DATA_FILE.with_name(DATA_FILE.name + '.corrupt')
+            DATA_FILE.replace(backup)
+            st.warning(f"Data file was unreadable — backed it up to {backup} and started fresh.")
+    return copy.deepcopy(DEFAULT_DATA)
+
+
 # Initialize session state
 if 'user_data' not in st.session_state:
-    if DATA_FILE.exists():
-        with open(DATA_FILE, 'r') as f:
-            st.session_state.user_data = json.load(f)
-    else:
-        st.session_state.user_data = {
-            'profile': {
-                'name': '',
-                'weight': 0,
-                'goal_weight': 0,
-                'daily_protein_g': 150,
-                'daily_calories': 2000
-            },
-            'meals': [],
-            'workouts': [],
-            'supplements': []
-        }
+    st.session_state.user_data = load_data()
+
 
 def save_data():
-    """Save user data to JSON file"""
-    with open(DATA_FILE, 'w') as f:
+    """Save user data atomically so a crash mid-write can't corrupt the file."""
+    tmp = DATA_FILE.with_name(DATA_FILE.name + '.tmp')
+    with open(tmp, 'w') as f:
         json.dump(st.session_state.user_data, f, indent=2)
+    tmp.replace(DATA_FILE)
+
 
 # Header
 st.title("🏋️ Golden Nutrition AI")
@@ -76,6 +92,19 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.header("Today's Summary")
 
+    # Goals come from the saved profile, not the live sidebar widgets
+    saved_profile = st.session_state.user_data['profile']
+    protein_goal = saved_profile.get('daily_protein_g', 150)
+    calorie_goal = saved_profile.get('daily_calories', 2000)
+
+    if saved_profile.get('weight') and saved_profile.get('goal_weight'):
+        diff = saved_profile['weight'] - saved_profile['goal_weight']
+        if diff == 0:
+            st.caption(f"Weight: {saved_profile['weight']} lbs — at goal! 🎯")
+        else:
+            direction = "to lose" if diff > 0 else "to gain"
+            st.caption(f"Weight: {saved_profile['weight']} lbs → goal {saved_profile['goal_weight']} lbs ({abs(diff)} lbs {direction})")
+
     today = date.today().isoformat()
 
     # Filter today's data
@@ -90,12 +119,12 @@ with tab1:
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        protein_pct = min(100, (total_protein / daily_protein * 100) if daily_protein > 0 else 0)
-        st.metric("Protein", f"{total_protein}g / {daily_protein}g", f"{protein_pct:.0f}%")
+        protein_pct = min(100, (total_protein / protein_goal * 100) if protein_goal > 0 else 0)
+        st.metric("Protein", f"{total_protein}g / {protein_goal}g", f"{protein_pct:.0f}%")
 
     with col2:
-        cal_pct = min(100, (total_calories / daily_calories * 100) if daily_calories > 0 else 0)
-        st.metric("Calories", f"{total_calories} / {daily_calories}", f"{cal_pct:.0f}%")
+        cal_pct = min(100, (total_calories / calorie_goal * 100) if calorie_goal > 0 else 0)
+        st.metric("Calories", f"{total_calories} / {calorie_goal}", f"{cal_pct:.0f}%")
 
     with col3:
         st.metric("Meals Logged", len(today_meals))
@@ -111,14 +140,14 @@ with tab1:
     # Recent activity
     st.markdown("### Recent Meals")
     if today_meals:
-        for meal in today_meals[-3:]:
+        for meal in sorted(today_meals, key=lambda m: m.get('time', ''))[-3:]:
             st.markdown(f"**{meal['time']}** - {meal['name']}: {meal.get('protein', 0)}g protein, {meal.get('calories', 0)} cal")
     else:
         st.info("No meals logged today")
 
     st.markdown("### Recent Workouts")
     if today_workouts:
-        for workout in today_workouts[-2:]:
+        for workout in sorted(today_workouts, key=lambda w: w.get('time', ''))[-2:]:
             st.markdown(f"**{workout['time']}** - {workout['name']} ({workout.get('duration', 0)} min)")
     else:
         st.info("No workouts logged today")
@@ -140,18 +169,21 @@ with tab2:
         notes = st.text_area("Notes", placeholder="Optional notes...")
 
     if st.button("Add Meal"):
-        meal = {
-            'date': meal_date.isoformat(),
-            'time': meal_time.strftime("%H:%M"),
-            'name': meal_name,
-            'protein': protein,
-            'calories': calories,
-            'notes': notes
-        }
-        st.session_state.user_data['meals'].append(meal)
-        save_data()
-        st.success(f"Added: {meal_name}")
-        st.rerun()
+        if not meal_name.strip():
+            st.error("Please enter a meal name before adding.")
+        else:
+            meal = {
+                'date': meal_date.isoformat(),
+                'time': meal_time.strftime("%H:%M"),
+                'name': meal_name.strip(),
+                'protein': protein,
+                'calories': calories,
+                'notes': notes
+            }
+            st.session_state.user_data['meals'].append(meal)
+            save_data()
+            st.success(f"Added: {meal_name}")
+            st.rerun()
 
     # Show recent meals
     st.markdown("### Recent Meals (Last 7 Days)")
@@ -162,7 +194,7 @@ with tab2:
     if recent_meals:
         df = pd.DataFrame(recent_meals)
         df = df.sort_values('date', ascending=False)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")
 
         # Delete meal option
         if st.checkbox("Delete mode"):
@@ -225,7 +257,17 @@ with tab3:
     if recent_workouts:
         df = pd.DataFrame(recent_workouts)
         df = df.sort_values('date', ascending=False)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")
+
+        if st.checkbox("Delete mode", key="workout_delete_mode"):
+            workout_to_delete = st.selectbox("Select workout to delete",
+                                            range(len(recent_workouts)),
+                                            format_func=lambda x: f"{recent_workouts[x]['date']} {recent_workouts[x]['time']} - {recent_workouts[x]['name']}")
+            if st.button("Delete Selected Workout"):
+                st.session_state.user_data['workouts'].remove(recent_workouts[workout_to_delete])
+                save_data()
+                st.success("Workout deleted")
+                st.rerun()
     else:
         st.info("No workouts logged in the last 7 days")
 
@@ -298,13 +340,26 @@ with tab4:
     if recent_supps:
         df = pd.DataFrame(recent_supps)
         df = df.sort_values('date', ascending=False)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")
+
+        if st.checkbox("Delete mode", key="supp_delete_mode"):
+            supp_to_delete = st.selectbox("Select supplement entry to delete",
+                                         range(len(recent_supps)),
+                                         format_func=lambda x: f"{recent_supps[x]['date']} - {recent_supps[x]['name']} ({recent_supps[x]['time']})")
+            if st.button("Delete Selected Supplement"):
+                st.session_state.user_data['supplements'].remove(recent_supps[supp_to_delete])
+                save_data()
+                st.success("Supplement entry deleted")
+                st.rerun()
     else:
         st.info("No supplements logged this week")
 
 # TAB 5: AI Insights
 with tab5:
     st.header("🧠 AI Auto-Adjust Insights")
+
+    # Goals come from the saved profile
+    protein_goal = st.session_state.user_data['profile'].get('daily_protein_g', 150)
 
     # Analyze last 7 days
     week_ago = (date.today() - timedelta(days=7)).isoformat()
@@ -313,10 +368,12 @@ with tab5:
 
     # Calculate averages
     if recent_meals:
+        days_logged = len({m['date'] for m in recent_meals})
         avg_protein = sum(m.get('protein', 0) for m in recent_meals) / len(recent_meals)
         avg_calories = sum(m.get('calories', 0) for m in recent_meals) / len(recent_meals)
 
         st.markdown("### Weekly Averages (Last 7 Days)")
+        st.caption(f"Averaged over {days_logged} day{'s' if days_logged != 1 else ''} with logged meals")
         col1, col2, col3 = st.columns(3)
 
         with col1:
@@ -324,46 +381,46 @@ with tab5:
         with col2:
             st.metric("Avg Calories/Meal", f"{avg_calories:.0f}")
         with col3:
-            st.metric("Meals/Day", f"{len(recent_meals)/7:.1f}")
+            st.metric("Meals/Day", f"{len(recent_meals)/days_logged:.1f}")
 
         # Protein chart
         st.markdown("### Daily Protein Intake (Last 7 Days)")
 
         # Group by date
-        daily_protein = {}
+        protein_by_day = {}
         for meal in recent_meals:
             date_key = meal['date']
-            if date_key not in daily_protein:
-                daily_protein[date_key] = 0
-            daily_protein[date_key] += meal.get('protein', 0)
+            if date_key not in protein_by_day:
+                protein_by_day[date_key] = 0
+            protein_by_day[date_key] += meal.get('protein', 0)
 
-        if daily_protein:
-            df_protein = pd.DataFrame(list(daily_protein.items()), columns=['Date', 'Protein'])
+        if protein_by_day:
+            df_protein = pd.DataFrame(list(protein_by_day.items()), columns=['Date', 'Protein'])
             df_protein = df_protein.sort_values('Date')
 
             fig = px.bar(df_protein, x='Date', y='Protein',
                         title='Daily Protein Intake',
                         labels={'Protein': 'Protein (g)'})
-            fig.add_hline(y=daily_protein, line_dash="dash",
-                         annotation_text=f"Goal: {daily_protein}g",
+            fig.add_hline(y=protein_goal, line_dash="dash",
+                         annotation_text=f"Goal: {protein_goal}g",
                          line_color="green")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         # AI Recommendations
         st.markdown("### 🎯 Auto-Adjust Recommendations")
 
-        total_daily_protein = sum(daily_protein.values()) / len(daily_protein) if daily_protein else 0
+        avg_daily_protein = sum(protein_by_day.values()) / days_logged
 
-        if total_daily_protein < daily_protein * 0.8:
-            st.warning(f"⚠️ You're averaging {total_daily_protein:.0f}g protein/day, below your {daily_protein}g goal")
+        if avg_daily_protein < protein_goal * 0.8:
+            st.warning(f"⚠️ You're averaging {avg_daily_protein:.0f}g protein/day, below your {protein_goal}g goal")
             st.markdown("**Suggestions:**")
             st.markdown("- Add a protein shake (30g protein)")
             st.markdown("- Increase protein portions at main meals")
-            st.markdown(f"- Add {daily_protein - total_daily_protein:.0f}g protein to reach goal")
-        elif total_daily_protein >= daily_protein:
-            st.success(f"✅ Great! You're hitting your {daily_protein}g protein goal!")
+            st.markdown(f"- Add {protein_goal - avg_daily_protein:.0f}g protein to reach goal")
+        elif avg_daily_protein >= protein_goal:
+            st.success(f"✅ Great! You're hitting your {protein_goal}g protein goal!")
         else:
-            st.info(f"📊 You're at {total_daily_protein:.0f}g/day. Close to your {daily_protein}g goal!")
+            st.info(f"📊 You're at {avg_daily_protein:.0f}g/day. Close to your {protein_goal}g goal!")
 
         # Workout consistency
         if recent_workouts:
