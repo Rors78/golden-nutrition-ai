@@ -1,6 +1,10 @@
 import streamlit as st
 import json
 import copy
+import os
+import shutil
+import subprocess
+import tempfile
 import anthropic
 import pandas as pd
 from datetime import datetime, date, timedelta
@@ -112,7 +116,57 @@ def history_editor(list_key, window_start, int_fields=(), float_fields=(), bool_
 
 # ---------------------------------------------------------------------------
 # Claude AI helpers
+#
+# Two backends, tried in order:
+#   1. Claude Code CLI (`claude -p`) — uses your Claude subscription
+#      (Pro/Max), no API credits needed. Preferred when installed.
+#   2. Anthropic API SDK — needs ANTHROPIC_API_KEY with credit balance.
 # ---------------------------------------------------------------------------
+
+NUTRITIONIST_PROMPT = (
+    "You are a nutrition expert. The user describes food they ate in plain "
+    "language. Break it into individual meals/items and estimate protein (g), "
+    "calories, carbs (g), fat (g), and fiber (g) for each, assuming realistic "
+    "typical portion sizes unless quantities are given. Round to sensible "
+    "whole numbers."
+)
+
+COACH_PROMPT = (
+    "You are Golden Nutrition AI, an expert fitness and nutrition coach for a "
+    "dedicated lifter following a push/pull/legs program. Be direct, specific, "
+    "and use the actual numbers from the data. Keep it under 400 words."
+)
+
+
+def claude_cli_available():
+    return shutil.which("claude") is not None
+
+
+def _run_claude_cli(prompt, timeout=300):
+    """Run a one-shot headless Claude Code prompt on the user's subscription."""
+    env = dict(os.environ)
+    # Make sure the CLI bills the Claude subscription login, not an API key
+    env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    result = subprocess.run(
+        ["claude", "-p", prompt, "--output-format", "text"],
+        capture_output=True, text=True, timeout=timeout, env=env,
+        cwd=tempfile.gettempdir(),  # neutral cwd: don't load any project context
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"Claude Code CLI failed: {detail[:500] or 'unknown error'}")
+    return result.stdout.strip()
+
+
+def _extract_json(text):
+    """Pull the first JSON object out of a model response (tolerates fences/prose)."""
+    start = text.find('{')
+    end = text.rfind('}')
+    if start == -1 or end <= start:
+        raise ValueError("No JSON object found in the AI response")
+    return json.loads(text[start:end + 1])
+
 
 MEAL_SCHEMA = {
     "type": "object",
@@ -162,45 +216,65 @@ def _claude_create(**kwargs):
 
 def parse_meals_with_ai(description):
     """Turn a plain-language meal description into structured macro estimates."""
-    response = _claude_create(
-        model=CLAUDE_MODEL,
-        max_tokens=16000,
-        system=(
-            "You are a nutrition expert. The user describes food they ate in plain "
-            "language. Break it into individual meals/items and estimate protein (g), "
-            "calories, carbs (g), fat (g), and fiber (g) for each, assuming realistic "
-            "typical portion sizes unless quantities are given. Round to sensible "
-            "whole numbers."
-        ),
-        messages=[{"role": "user", "content": description}],
-        output_config={"format": {"type": "json_schema", "schema": MEAL_SCHEMA}},
-    )
-    if response.stop_reason == "refusal":
-        raise RuntimeError("Claude declined to process this description.")
-    text = next(b.text for b in response.content if b.type == "text")
-    return json.loads(text)["meals"]
+    if claude_cli_available():
+        prompt = (
+            f"{NUTRITIONIST_PROMPT}\n\n"
+            f"The user's description:\n{description}\n\n"
+            "Respond with ONLY a JSON object — no markdown fences, no commentary — "
+            "in exactly this shape:\n"
+            '{"meals": [{"name": "...", "protein": 0, "calories": 0, '
+            '"carbs": 0, "fat": 0, "fiber": 0}]}'
+        )
+        text = _run_claude_cli(prompt, timeout=240)
+        meals = _extract_json(text)["meals"]
+    else:
+        response = _claude_create(
+            model=CLAUDE_MODEL,
+            max_tokens=16000,
+            system=NUTRITIONIST_PROMPT,
+            messages=[{"role": "user", "content": description}],
+            output_config={"format": {"type": "json_schema", "schema": MEAL_SCHEMA}},
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("Claude declined to process this description.")
+        text = next(b.text for b in response.content if b.type == "text")
+        meals = json.loads(text)["meals"]
+
+    # Normalize regardless of backend
+    cleaned = []
+    for m in meals:
+        if not str(m.get('name', '')).strip():
+            continue
+        cleaned.append({
+            'name': str(m['name']).strip(),
+            'protein': _clean_num(m.get('protein'), int),
+            'calories': _clean_num(m.get('calories'), int),
+            'carbs': _clean_num(m.get('carbs'), int),
+            'fat': _clean_num(m.get('fat'), int),
+            'fiber': _clean_num(m.get('fiber'), int),
+        })
+    if not cleaned:
+        raise RuntimeError("Claude couldn't identify any meals in that description.")
+    return cleaned
 
 
 def generate_coaching_summary(week_data):
     """Ask Claude for a weekly coaching summary based on tracked data."""
+    user_content = (
+        "Here is my last 7 days of tracking data as JSON:\n\n"
+        f"{json.dumps(week_data, indent=2)}\n\n"
+        "Give me a weekly coaching summary in markdown with three sections: "
+        "**What went well**, **What to fix**, and **The one change for next week** "
+        "(the single highest-impact adjustment)."
+    )
+    if claude_cli_available():
+        return _run_claude_cli(f"{COACH_PROMPT}\n\n{user_content}", timeout=300)
+
     response = _claude_create(
         model=CLAUDE_MODEL,
         max_tokens=16000,
-        system=(
-            "You are Golden Nutrition AI, an expert fitness and nutrition coach for a "
-            "dedicated lifter following a push/pull/legs program. Be direct, specific, "
-            "and use the actual numbers from the data. Keep it under 400 words."
-        ),
-        messages=[{
-            "role": "user",
-            "content": (
-                "Here is my last 7 days of tracking data as JSON:\n\n"
-                f"{json.dumps(week_data, indent=2)}\n\n"
-                "Give me a weekly coaching summary in markdown with three sections: "
-                "**What went well**, **What to fix**, and **The one change for next week** "
-                "(the single highest-impact adjustment)."
-            ),
-        }],
+        system=COACH_PROMPT,
+        messages=[{"role": "user", "content": user_content}],
     )
     if response.stop_reason == "refusal":
         raise RuntimeError("Claude declined to process this request.")
@@ -210,8 +284,9 @@ def generate_coaching_summary(week_data):
 def show_ai_error(e):
     if isinstance(e, anthropic.AuthenticationError):
         st.error(
-            "No valid Claude API credentials found. Set the ANTHROPIC_API_KEY "
-            "environment variable (or run `ant auth login`), then restart the app."
+            "No Claude backend available. Either install Claude Code and log in "
+            "(uses your Claude subscription), or set the ANTHROPIC_API_KEY "
+            "environment variable, then restart the app."
         )
     else:
         st.error(f"AI request failed: {e}")
