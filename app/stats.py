@@ -127,6 +127,38 @@ def progression(data):
     }
 
 
+def training_summary(data):
+    """This week's training load + consecutive-week streak (3+ sessions/week)."""
+    week_ago = _week_ago()
+    recent = [w for w in data['workouts'] if w['date'] >= week_ago]
+    volume = 0.0
+    for w in recent:
+        for ex in w.get('exercises', []):
+            volume += ex.get('sets', 0) * ex.get('reps', 0) * ex.get('weight', 0)
+
+    # Streak: consecutive 7-day blocks (ending today) with 3+ sessions
+    streak = 0
+    block = 0
+    while True:
+        start = (date.today() - timedelta(days=7 * (block + 1) - 1)).isoformat()
+        end = (date.today() - timedelta(days=7 * block)).isoformat()
+        count = sum(1 for w in data['workouts'] if start <= w['date'] <= end)
+        if count >= 3:
+            streak += 1
+            block += 1
+        else:
+            break
+        if block > 260:  # five years of streak is enough arithmetic
+            break
+
+    return {
+        'sessions_7d': len(recent),
+        'minutes_7d': sum(w.get('duration', 0) for w in recent),
+        'volume_7d': round(volume),
+        'streak_weeks': streak,
+    }
+
+
 def quick_meals(data, limit=12):
     """Most recent distinct meals by name, newest first."""
     seen, out = set(), []

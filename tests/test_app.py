@@ -83,6 +83,11 @@ def test_full_week_stats(client):
     assert ins["avg_daily_protein"] == 45
     assert ins["verdict"]["level"] == "warn"  # 45g/day vs 150g goal
 
+    trn = state["stats"]["training"]
+    assert trn["sessions_7d"] == 6 and trn["minutes_7d"] == 360
+    assert trn["volume_7d"] == 17400  # sum of 4x10x(70..75)
+    assert trn["streak_weeks"] == 1   # this week qualifies, previous doesn't
+
     assert state["stats"]["checklist"] == [{"name": "Creatine", "time": "Morning", "taken": False}]
 
 

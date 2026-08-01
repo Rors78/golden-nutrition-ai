@@ -45,6 +45,7 @@ def get_state():
             'quick_meals': stats.quick_meals(d),
             'checklist': stats.checklist(d),
             'adherence': stats.supplement_adherence(d),
+            'training': stats.training_summary(d),
         },
         'ai_backend': ai.backend_name(),
         'recovery_note': note,

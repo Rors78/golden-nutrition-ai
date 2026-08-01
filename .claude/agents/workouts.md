@@ -9,9 +9,13 @@ the training log and the progression analytics — the answer to "am I actually
 getting stronger?".
 
 **Your files:**
-- `app/static/js/sections/workouts.js` — log form with dynamic exercise rows, progression card, 7-day history
+- `app/static/js/sections/workouts.js` — weekly load metrics, coach-plan loader
+  (`parsePlanLine` turns plan lines into exercise rows), log form with last-time
+  hints + PR detection, rest timer, progression card, 7-day history
 - `app/api.py` → `/api/workouts`, the `workouts` branch of `/api/entry/*`
-- `app/stats.py` → `progression()` — per-exercise `{date, top, volume}` series
+- `app/stats.py` → `progression()` — per-exercise `{date, top, volume}` series —
+  and `training_summary()` (7d sessions/minutes/volume + 3-sessions-per-week streak;
+  pinned in tests: 6 sessions / 360 min / 17400 lbs / streak 1)
 
 **Domain invariants:**
 - A workout's `exercises` is a list of `{exercise, sets, reps, weight}`; rows
