@@ -4,6 +4,7 @@ import io
 import json
 import secrets
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from flask import Blueprint, jsonify, request, Response
 
@@ -981,3 +982,31 @@ def export_csv(kind):
                              for k, v in r.items()})
     return Response(buf.getvalue(), mimetype='text/csv',
                     headers={'Content-Disposition': f'attachment; filename={kind}.csv'})
+
+
+@bp.get('/export/backup.json')
+def export_backup():
+    """The whole data file, for safekeeping off this machine."""
+    d = store.load()
+    return Response(json.dumps(d, indent=2), mimetype='application/json',
+                    headers={'Content-Disposition':
+                             f'attachment; filename=golden-nutrition-{date.today().isoformat()}.json'})
+
+
+@bp.post('/import/backup')
+def import_backup():
+    """Restore from a backup JSON. The current file is snapshotted first."""
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict) or 'profile' not in body or 'meals' not in body:
+        return _err('That does not look like a Golden Nutrition backup '
+                    '(expecting the JSON file from "Full backup").')
+    current = store.load()
+    snap = Path('nutrition_data.pre-restore.json')
+    snap.write_text(json.dumps(current, indent=2))
+    store.save(body)
+    restored = store.load()  # re-load runs the usual defaults/migration
+    return jsonify({'ok': True,
+                    'meals': len(restored['meals']),
+                    'workouts': len(restored['workouts']),
+                    'weights': len(restored['weights']),
+                    'snapshot': str(snap)})

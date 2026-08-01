@@ -8,9 +8,16 @@ CLI (`claude -p`), falling back to the Anthropic API when the CLI isn't installe
 ## Commands
 
 ```bash
-./venv/bin/python run.py            # serve on http://localhost:8501
+./venv/bin/python run.py            # serve on http://localhost:8501 (GNA_HOST overrides bind)
 ./venv/bin/python -m pytest tests/  # run the test suite (no AI credentials needed)
+./scripts/setup_remote_access.sh    # phone access: Tailscale + HTTPS in front of localhost
+./scripts/install_backup_timer.sh   # nightly data snapshots -> backups/ (14 kept)
 ```
+
+The app stays bound to 127.0.0.1; remote access goes through `tailscale serve`
+(HTTPS on the private tailnet), never a wide bind. Full backup / restore lives
+in the footer (`/api/export/backup.json`, `/api/import/backup` — restore
+snapshots the current file to `nutrition_data.pre-restore.json` first).
 
 CI (GitHub Actions) runs pytest on every push and PR.
 

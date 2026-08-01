@@ -279,6 +279,22 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// Restore from a full-backup JSON (footer). The server snapshots the current
+// file before replacing it, so a bad pick is recoverable.
+document.getElementById('restore-input')?.addEventListener('change', async ev => {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  try {
+    const body = JSON.parse(await file.text());
+    const res = await api('POST', '/import/backup', body);
+    toast(`Restored: ${res.meals} meals, ${res.workouts} workouts, ${res.weights} weigh-ins`);
+    await refresh();
+  } catch (e) {
+    toast(e.message.startsWith('Unexpected') ? 'That file is not valid JSON.' : e.message);
+  }
+});
+
 // ── voice logging: hold the coach's ear ─────────────────────────────────
 (function initVoice() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;

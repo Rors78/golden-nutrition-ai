@@ -197,6 +197,51 @@ def test_dashboard_radar(client):
     assert len(radar) <= 4
 
 
+def test_backup_export_and_restore(client):
+    client.post("/api/meals", json={"name": "Original meal", "protein": 40})
+    r = client.get("/api/export/backup.json")
+    assert r.status_code == 200
+    assert "attachment" in r.headers["Content-Disposition"]
+    backup = r.get_json()
+    assert backup["meals"][0]["name"] == "Original meal"
+
+    # garbage is rejected and nothing changes
+    assert client.post("/api/import/backup", json={"nope": True}).status_code == 400
+    assert client.post("/api/import/backup", data="not json",
+                       content_type="application/json").status_code == 400
+    assert client.get("/api/state").get_json()["meals"][0]["name"] == "Original meal"
+
+    # a real restore replaces the data and snapshots what was there
+    backup["meals"][0]["name"] = "Restored meal"
+    backup["weights"] = [{"date": date.today().isoformat(), "weight": 190}]
+    r = client.post("/api/import/backup", json=backup)
+    assert r.status_code == 200 and r.get_json()["weights"] == 1
+    state = client.get("/api/state").get_json()
+    assert state["meals"][0]["name"] == "Restored meal"
+    with open("nutrition_data.pre-restore.json") as f:
+        assert json.load(f)["meals"][0]["name"] == "Original meal"
+
+
+def test_backup_script_rotates(client, tmp_path):
+    import subprocess, sys, shutil
+    from pathlib import Path
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    root = Path(__file__).resolve().parent.parent
+    shutil.copy2(root / "scripts" / "backup_data.py", repo / "scripts" / "backup_data.py")
+    (repo / "nutrition_data.json").write_text('{"profile": {}}')
+    # pre-seed 20 fake old snapshots; the run should prune to KEEP=14
+    (repo / "backups").mkdir()
+    for i in range(20):
+        (repo / "backups" / f"nutrition_data-2026-01-{i + 1:02d}.json").write_text("{}")
+    out = subprocess.run([sys.executable, str(repo / "scripts" / "backup_data.py")],
+                         capture_output=True, text=True)
+    assert out.returncode == 0
+    snaps = list((repo / "backups").glob("nutrition_data-*.json"))
+    assert len(snaps) == 14
+    assert (repo / "backups" / f"nutrition_data-{date.today().isoformat()}.json").exists()
+
+
 def test_remedy_cabinet(client):
     # everything is locked until the key turns
     assert client.post("/api/remedies/cabinet", json={"id": "x"}).status_code == 403
