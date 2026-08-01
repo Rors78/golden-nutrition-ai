@@ -168,6 +168,36 @@ def test_declining_weights_produce_no_prs(client):
     assert client.get("/api/state").get_json()["stats"]["recent_prs"] == []
 
 
+def test_coach_fit(client):
+    # empty profile -> maintaining
+    fit = client.get("/api/state").get_json()["stats"]["coach_fit"]
+    assert fit["direction"] == "maintain" and len(fit["ids"]) == 3
+
+    client.post("/api/profile", json={"weight": 200, "goal_weight": 185})
+    fit = client.get("/api/state").get_json()["stats"]["coach_fit"]
+    assert fit["direction"] == "cut" and fit["label"] == "cutting"
+    assert fit["ids"] == ["wicks", "goggins", "simmons"]
+
+    client.post("/api/profile", json={"weight": 160, "goal_weight": 180, "age": 60})
+    fit = client.get("/api/state").get_json()["stats"]["coach_fit"]
+    assert fit["direction"] == "gain"
+    assert fit["ids"][0] == "lalanne"  # 55+ puts longevity first
+
+
+def test_roster_dossiers_complete(client):
+    coaches = client.get("/api/state").get_json()["coaches"]
+    assert len(coaches) == 20
+    assert len({c["id"] for c in coaches}) == 20
+    for c in coaches:
+        for field in ("name", "goal", "style", "vibe", "workout",
+                      "nutrition", "supplements", "voice", "caveats"):
+            assert c.get(field, "").strip(), f"{c['id']} missing {field}"
+    from app.stats import COACH_FIT
+    ids = {c["id"] for c in coaches}
+    for group in COACH_FIT.values():
+        assert set(group) <= ids  # fit groups only name real coaches
+
+
 def test_watch_insights(client):
     seed({"watches": [
         {"item": "Whey 5lb", "created": "2026-07-01", "history": [

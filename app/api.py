@@ -111,6 +111,7 @@ def get_state():
             'plan_progress': stats.plan_progress(d),
             'dashboard': stats.dashboard_extras(d),
             'watch_insights': stats.watch_insights(d),
+            'coach_fit': stats.coach_fit(d),
         },
         'ai_backend': ai.backend_name(),
         'recovery_note': note,

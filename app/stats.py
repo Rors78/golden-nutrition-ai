@@ -735,6 +735,31 @@ def watch_insights(data):
     return out
 
 
+# Rule-based coach-fit groups, by training direction. Presentation-level
+# guidance only — every coach works for every goal if the user likes the voice.
+COACH_FIT = {
+    'cut': ('wicks', 'goggins', 'simmons', 'casseyho', 'phelps', 'austin'),
+    'gain': ('cutler', 'nippard', 'arnold', 'hall', 'heria', 'serena'),
+    'maintain': ('lalanne', 'jetli', 'adriene', 'pavel', 'biles', 'fraser'),
+}
+
+
+def coach_fit(data):
+    """Top-3 coach suggestions for the user's current direction."""
+    prof = data['profile']
+    weight, goal = prof.get('weight') or 0, prof.get('goal_weight') or 0
+    if weight and goal and abs(weight - goal) >= 2:
+        direction = 'cut' if goal < weight else 'gain'
+    else:
+        direction = 'maintain'
+    age = prof.get('age') or 0
+    ids = list(COACH_FIT[direction])
+    if age >= 55 and direction != 'maintain':
+        ids = ['lalanne'] + [i for i in ids if i != 'lalanne']  # longevity first at 55+
+    label = {'cut': 'cutting', 'gain': 'building', 'maintain': 'maintaining'}[direction]
+    return {'direction': direction, 'label': label, 'ids': ids[:3]}
+
+
 def consecutive_days(dates_set):
     """Days-in-a-row ending today that appear in the given date set."""
     streak, day = 0, date.today()

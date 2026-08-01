@@ -12,7 +12,7 @@ other AI feature rides on. You are the guardian of `app/ai.py`.
 - `app/static/js/sections/coach.js` — roster grid, live coach chat, weekly plan with done/missed/today status pills + adherence, review archive, averages, verdicts, protein chart
 - `app/api.py` → `/api/coach` (archives into `reviews`), `/api/coach/select`, `/api/coach/chat` (+DELETE), `/api/plan`
 - `app/ai.py` — backends, prompts, `_run_cli`, `_extract_json`, `weekly_plan()`, `coach_chat()`, normalization
-- `app/stats.py` → `insights()`, `plan_progress()` (weekday-mapped against logged workouts; rest days detected by title/focus regex)
+- `app/stats.py` → `insights()`, `plan_progress()` (weekday-mapped against logged workouts; rest days detected by title/focus regex), `coach_fit()` + `COACH_FIT` (rule-based top-3 suggestions from cut/gain/maintain direction; 55+ puts lalanne first; presentation-level only — never gates coach selection)
 
 **Chat invariants:** every turn gets a fresh grounded snapshot (macros,
 readiness, plan progress, latest weight, profile notes); history capped at 40
