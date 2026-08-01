@@ -2,11 +2,12 @@
 import csv
 import io
 import json
+import secrets
 from datetime import date, datetime
 
 from flask import Blueprint, jsonify, request, Response
 
-from . import ai, data as store, stats
+from . import ai, data as store, notify, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
 from .data import clean_num
 from .supplement_kb import KB
@@ -20,9 +21,48 @@ def _err(message, status=400):
     return jsonify({'error': str(message)}), status
 
 
+VITAL_ALIASES = {
+    'steps': ('steps', 'step_count', 'stepCount'),
+    'resting_hr': ('resting_hr', 'restingHeartRate', 'resting_heart_rate', 'rhr', 'heart_rate'),
+    'hrv_ms': ('hrv_ms', 'hrv', 'heartRateVariability'),
+    'sleep_h': ('sleep_h', 'sleep_hours', 'sleepHours'),
+    'bp_sys': ('bp_sys', 'systolic', 'bloodPressureSystolic'),
+    'bp_dia': ('bp_dia', 'diastolic', 'bloodPressureDiastolic'),
+}
+
+
+def _normalize_vital(raw):
+    """Accept flexible payloads (Health Connect exporters vary) → one clean row."""
+    day = str(raw.get('date') or date.today().isoformat())[:10]
+    row = {'date': day}
+    for field, aliases in VITAL_ALIASES.items():
+        for a in aliases:
+            if raw.get(a) is not None and raw.get(a) != '':
+                cast = float if field in ('sleep_h', 'hrv_ms') else int
+                row[field] = store.clean_num(raw[a], cast)
+                break
+    # sleep sometimes arrives in minutes
+    if 'sleep_h' not in row and raw.get('sleep_minutes') not in (None, ''):
+        row['sleep_h'] = round(store.clean_num(raw['sleep_minutes'], float) / 60, 2)
+    return row
+
+
+def _merge_vital(d, row):
+    """One row per date; new non-null fields overwrite, others survive."""
+    for v in d['vitals']:
+        if v['date'] == row['date']:
+            v.update({k: val for k, val in row.items() if k != 'date'})
+            return
+    d['vitals'].append(row)
+    d['vitals'].sort(key=lambda v: v['date'])
+
+
 @bp.get('/state')
 def get_state():
     d = store.load()
+    if not d['settings'].get('ingest_token'):
+        d['settings']['ingest_token'] = secrets.token_hex(8)
+        store.save(d)
     note, store.last_recovery_note = store.last_recovery_note, None
     return jsonify({
         'profile': d['profile'],
@@ -31,6 +71,9 @@ def get_state():
         'supplements': d['supplements'],
         'schedule': d['supplement_schedule'],
         'weights': sorted(d['weights'], key=lambda w: w['date']),
+        'vitals': sorted(d.get('vitals', []), key=lambda v: v['date']),
+        'settings': d['settings'],
+        'briefing': d.get('briefing'),
         'deals': d.get('deals'),
         'supp_advice': d.get('supp_advice'),
         'kb': KB,
@@ -46,6 +89,7 @@ def get_state():
             'checklist': stats.checklist(d),
             'adherence': stats.supplement_adherence(d),
             'training': stats.training_summary(d),
+            'vitals': stats.vitals_summary(d),
         },
         'ai_backend': ai.backend_name(),
         'recovery_note': note,
@@ -184,6 +228,100 @@ def ai_add_meals():
             d['meals'].append(meal)
     store.save(d)
     return jsonify({'ok': True, 'added': len(meals)})
+
+
+@bp.post('/vitals')
+def add_vitals():
+    row = _normalize_vital(request.get_json(force=True))
+    if len(row) == 1:
+        return _err('No vital readings in that entry.')
+    d = store.load()
+    _merge_vital(d, row)
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.post('/ingest')
+def ingest():
+    """Webhook for wearable exporters (Health Connect sync apps, scripts).
+    POST /api/ingest?token=... with one reading or {"days": [...]}."""
+    d = store.load()
+    token = d['settings'].get('ingest_token')
+    if not token or request.args.get('token') != token:
+        return _err('Bad or missing ingest token.', 401)
+    body = request.get_json(force=True, silent=True) or {}
+    rows = body.get('days') if isinstance(body.get('days'), list) else [body]
+    merged = 0
+    for raw in rows:
+        row = _normalize_vital(raw if isinstance(raw, dict) else {})
+        if len(row) > 1:
+            _merge_vital(d, row)
+            merged += 1
+    if not merged:
+        return _err('No recognizable vital fields in the payload.')
+    store.save(d)
+    return jsonify({'ok': True, 'merged': merged})
+
+
+@bp.post('/settings')
+def save_settings():
+    body = request.get_json(force=True)
+    d = store.load()
+    s = d['settings']
+    if 'ntfy_topic' in body:
+        s['ntfy_topic'] = str(body['ntfy_topic']).strip()
+    if 'ntfy_server' in body:
+        s['ntfy_server'] = str(body['ntfy_server']).strip() or 'https://ntfy.sh'
+    if 'daily_steps' in body:
+        s['daily_steps'] = clean_num(body['daily_steps']) or 8000
+    store.save(d)
+    return jsonify({'ok': True, 'settings': s})
+
+
+@bp.post('/notify/test')
+def notify_test():
+    d = store.load()
+    try:
+        sent = notify.push(d['settings'], 'Golden Nutrition AI',
+                           'Coach line is live. Notifications will land here.')
+    except Exception as e:
+        return _err(f'Push failed: {e}', 502)
+    if not sent:
+        return _err('Set an ntfy topic first.')
+    return jsonify({'ok': True})
+
+
+@bp.post('/briefing')
+def briefing():
+    d = store.load()
+    coach = get_coach(d['profile'].get('coach', DEFAULT_COACH))
+    today = date.today().isoformat()
+    week = (d.get('plan') or {}).get('plan', {}).get('week', [])
+    day_name = datetime.now().strftime('%A')
+    plan_day = next((x for x in week if day_name.lower() in x.get('day', '').lower()), None)
+    vs = stats.vitals_summary(d)
+    context = json.dumps({
+        'weekday': day_name,
+        'planned_session': plan_day,
+        'yesterday_vitals': (vs.get('series') or [])[-1:] if vs.get('has_data') else [],
+        'goals': {'protein_g': d['profile'].get('daily_protein_g'),
+                  'calories': d['profile'].get('daily_calories'),
+                  'steps': d['settings'].get('daily_steps')},
+        'stack_adherence_7d': stats.supplement_adherence(d),
+        'latest_weight': (sorted(d['weights'], key=lambda w: w['date'])[-1]
+                          if d['weights'] else None),
+    })
+    try:
+        text = ai.daily_briefing(d['profile'], persona_prompt(coach), context)
+    except Exception as e:
+        return _err(e, 502)
+    d['briefing'] = {'date': today, 'coach': coach['id'], 'text': text}
+    store.save(d)
+    try:
+        notify.push(d['settings'], f"{coach['name']} — morning briefing", text[:400])
+    except Exception:
+        pass  # the briefing still lands in the app if the push fails
+    return jsonify(d['briefing'])
 
 
 @bp.post('/weights')
@@ -352,6 +490,7 @@ def coach():
         'workouts': [w for w in d['workouts'] if w['date'] >= cutoff],
         'supplements': [s for s in d['supplements'] if s['date'] >= cutoff],
         'weigh_ins': [w for w in d['weights'] if w['date'] >= cutoff],
+        'vitals': [v for v in d.get('vitals', []) if v['date'] >= cutoff],
     }
     if not week_data['meals'] and not week_data['workouts']:
         return _err("Log some meals or workouts first — there's nothing from the last 7 days to review.")

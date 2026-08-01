@@ -334,6 +334,81 @@ def test_supplement_adherence(client):
     assert adh["pct"] == 14  # 1 of 7 daily slots this week
 
 
+def test_vitals_ingest_merge_and_summary(client):
+    state = client.get("/api/state").get_json()
+    token = state["settings"]["ingest_token"]
+    assert token  # auto-generated on first load
+    assert state["stats"]["vitals"] == {"has_data": False}
+
+    # webhook rejects bad tokens
+    assert client.post("/api/ingest?token=wrong", json={"steps": 100}).status_code == 401
+
+    today = date.today().isoformat()
+    r = client.post(f"/api/ingest?token={token}", json={
+        "date": today, "stepCount": 9000, "restingHeartRate": 58, "sleep_minutes": 450})
+    assert r.status_code == 200 and r.get_json()["merged"] == 1
+
+    # same-day merge: BP arrives later, steps survive
+    client.post("/api/vitals", json={"date": today, "bp_sys": 128, "bp_dia": 82})
+    vs = client.get("/api/state").get_json()["stats"]["vitals"]
+    assert vs["has_data"] is True
+    assert vs["latest"]["steps"]["value"] == 9000
+    assert vs["latest"]["sleep_h"]["value"] == 7.5   # minutes converted
+    assert vs["bp"] == {"sys": 128, "dia": 82, "date": today, "level": "elevated"}
+    assert len(client.get("/api/state").get_json()["vitals"]) == 1
+
+    # batch form
+    r = client.post(f"/api/ingest?token={token}", json={"days": [
+        {"date": "2026-07-29", "steps": 7000}, {"date": "2026-07-30", "steps": 11000}]})
+    assert r.get_json()["merged"] == 2
+
+
+def test_settings_and_notify(client, monkeypatch):
+    client.post("/api/settings", json={"ntfy_topic": "gna-test", "daily_steps": 10000})
+    s = client.get("/api/state").get_json()["settings"]
+    assert s["ntfy_topic"] == "gna-test" and s["daily_steps"] == 10000
+
+    from app import notify
+    sent = {}
+    monkeypatch.setattr(notify, "push", lambda st, title, msg, priority='default':
+                        sent.update(topic=st["ntfy_topic"], title=title) or True)
+    assert client.post("/api/notify/test").status_code == 200
+    assert sent["topic"] == "gna-test"
+
+
+def test_briefing_generates_pushes_and_caches(client, monkeypatch):
+    client.post("/api/coach/select", json={"id": "goggins"})
+    from app import notify
+    pushed = {}
+    monkeypatch.setattr(notify, "push", lambda st, title, msg, priority='default':
+                        pushed.update(title=title) or True)
+    captured = {}
+
+    def fake_brief(profile, persona, context):
+        captured["persona"] = persona
+        captured["context"] = json.loads(context)
+        return "Run. Eat. Stay hard."
+    monkeypatch.setattr(ai, "daily_briefing", fake_brief)
+
+    r = client.post("/api/briefing")
+    assert r.status_code == 200
+    assert r.get_json()["text"] == "Run. Eat. Stay hard."
+    assert "David Goggins" in captured["persona"]
+    assert "goals" in captured["context"] and "weekday" in captured["context"]
+    assert "David Goggins" in pushed["title"]
+
+    state = client.get("/api/state").get_json()
+    assert state["briefing"]["date"] == date.today().isoformat()
+    assert state["briefing"]["coach"] == "goggins"
+
+
+def test_pwa_surfaces(client):
+    assert client.get("/sw.js").status_code == 200
+    assert b"manifest.webmanifest" in client.get("/").data
+    assert client.get("/static/manifest.webmanifest").status_code == 200
+    assert client.get("/static/icon.svg").status_code == 200
+
+
 def test_corrupt_file_recovery(client, tmp_path):
     (tmp_path / "nutrition_data.json").write_text("{not json")
     state = client.get("/api/state").get_json()

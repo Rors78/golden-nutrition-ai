@@ -58,6 +58,6 @@ must keep loading (defaults fill in — `test_legacy_v1_data_still_loads` guards
 
 One agent per app section lives in `.claude/agents/` — delegate section work to
 them (e.g. "have the meals agent add a barcode field"): `dashboard`, `weight`,
-`meals`, `workouts`, `supplements`, `deals`, `coach`, `roster` (the 20 coach
+`vitals` (wearables, notifications, PWA), `meals`, `workouts`, `supplements`, `deals`, `coach`, `roster` (the 20 coach
 personas), plus `design` (visual system) and `qa` (tests/CI). Each owns its
 section's JS module and API endpoints.

@@ -1,6 +1,7 @@
 // Golden Nutrition AI — SPA core: state, router, helpers.
 import { renderDashboard } from './sections/dashboard.js';
 import { renderWeight } from './sections/weight.js';
+import { renderVitals } from './sections/vitals.js';
 import { renderMeals } from './sections/meals.js';
 import { renderWorkouts } from './sections/workouts.js';
 import { renderSupplements } from './sections/supplements.js';
@@ -10,6 +11,7 @@ import { renderCoach } from './sections/coach.js';
 const SECTIONS = {
   dashboard: renderDashboard,
   weight: renderWeight,
+  vitals: renderVitals,
   meals: renderMeals,
   workouts: renderWorkouts,
   supplements: renderSupplements,
@@ -267,6 +269,11 @@ function initBrandPlate() {
   } catch { /* WebGL unavailable — the CSS plate underneath still shows */ }
 }
 initBrandPlate();
+
+// PWA: installable app + offline shell
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 
 // 3D machined-plate disc with embossed monogram — coach cards & badges
 export function plateDisc(text, { size = 44, tier = 'gold' } = {}) {

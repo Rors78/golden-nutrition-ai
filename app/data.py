@@ -21,7 +21,14 @@ DEFAULT_DATA = {
     'workouts': [],
     'supplements': [],
     'supplement_schedule': [],
-    'weights': []
+    'weights': [],
+    'vitals': [],
+    'settings': {
+        'ntfy_server': 'https://ntfy.sh',
+        'ntfy_topic': '',
+        'ingest_token': '',
+        'daily_steps': 8000
+    }
 }
 
 MACRO_FIELDS = ('protein', 'calories', 'carbs', 'fat', 'fiber')

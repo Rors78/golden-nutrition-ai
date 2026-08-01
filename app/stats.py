@@ -236,6 +236,47 @@ def supplement_adherence(data, days=7):
             'pct': round(taken / slots * 100) if slots else 0}
 
 
+VITAL_FIELDS = ('steps', 'resting_hr', 'hrv_ms', 'sleep_h', 'bp_sys', 'bp_dia')
+
+
+def vitals_summary(data):
+    """Latest readings + 7-day averages from the wearable/manual vitals log."""
+    vitals = sorted(data.get('vitals', []), key=lambda v: v['date'])
+    if not vitals:
+        return {'has_data': False}
+
+    def latest(field):
+        for v in reversed(vitals):
+            if v.get(field) is not None:
+                return {'value': v[field], 'date': v['date']}
+        return None
+
+    week_ago = _week_ago()
+    recent = [v for v in vitals if v['date'] >= week_ago]
+
+    def avg7(field):
+        vals = [v[field] for v in recent if v.get(field) is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    bp = None
+    for v in reversed(vitals):
+        if v.get('bp_sys') is not None and v.get('bp_dia') is not None:
+            level = 'urgent' if v['bp_sys'] >= 180 or v['bp_dia'] >= 120 else \
+                    'high' if v['bp_sys'] >= 140 or v['bp_dia'] >= 90 else \
+                    'elevated' if v['bp_sys'] >= 130 or v['bp_dia'] >= 80 else 'normal'
+            bp = {'sys': v['bp_sys'], 'dia': v['bp_dia'], 'date': v['date'], 'level': level}
+            break
+
+    return {
+        'has_data': True,
+        'latest': {f: latest(f) for f in VITAL_FIELDS},
+        'avg7': {f: avg7(f) for f in ('steps', 'resting_hr', 'hrv_ms', 'sleep_h')},
+        'bp': bp,
+        'series': vitals,
+        'steps_goal': data.get('settings', {}).get('daily_steps', 8000),
+    }
+
+
 def checklist(data):
     today = date.today().isoformat()
     items = []

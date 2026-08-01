@@ -1,5 +1,5 @@
-// Dashboard: hero progress rings, today's plan, today's numbers, recent activity.
-import { el, esc, metric, ring } from '../app.js';
+// Dashboard: morning briefing, hero rings, today's plan, numbers, activity.
+import { el, esc, api, toast, refresh, metric, ring, markdown } from '../app.js';
 
 export function renderDashboard(root, state) {
   const p = state.profile;
@@ -17,6 +17,35 @@ export function renderDashboard(root, state) {
   } else {
     root.append(el(`<p class="section-sub">Set your weight and goal in Profile to unlock pace tracking.</p>`));
   }
+
+  // Morning briefing from the coach
+  const briefCoach = (state.coaches || []).find(c => c.id === (state.briefing?.coach || state.coach));
+  const todayIso = new Date().toISOString().slice(0, 10);
+  if (state.briefing?.date === todayIso) {
+    root.append(el(`<div class="card" style="margin-top:4px;border-left:4px solid var(--gold)">
+      <p class="chart-title">Morning briefing · ${esc(briefCoach?.name || 'Coach')}</p>
+      <div class="prose" style="font-size:14px">${markdown(state.briefing.text)}</div>
+    </div>`));
+  } else {
+    const bb = el(`<div style="margin:4px 0 10px"><button class="ghost-btn" type="button">Get today's briefing from ${esc(briefCoach?.name || 'your coach')}</button></div>`);
+    bb.querySelector('button').addEventListener('click', async ev => {
+      ev.target.disabled = true;
+      ev.target.textContent = 'Coach is writing…';
+      try {
+        await api('POST', '/briefing');
+        toast('Briefing ready');
+        await refresh();
+      } catch (e) {
+        toast(e.message);
+        ev.target.disabled = false;
+        ev.target.textContent = 'Get today\'s briefing';
+      }
+    });
+    root.append(bb);
+  }
+
+  // Steps from the watch, if vitals are flowing
+  const vsum = state.stats.vitals;
 
   // Hero: the two rings that define the day
   const hero = el('<div class="card"><div class="rings"></div></div>');
@@ -37,6 +66,9 @@ export function renderDashboard(root, state) {
   const adh = state.stats.adherence;
   if (adh?.has_schedule) {
     grid.append(metric('Stack adherence', adh.pct, { suffix: '%', small: '7d' }));
+  }
+  if (vsum?.has_data && vsum.latest.steps) {
+    grid.append(metric('Steps', vsum.latest.steps.value, { small: `goal ${vsum.steps_goal}` }));
   }
   root.append(grid);
 

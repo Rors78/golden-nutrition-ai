@@ -412,6 +412,36 @@ def supplement_advice(profile, persona, context):
     return advice
 
 
+def daily_briefing(profile, persona, context):
+    """A short morning briefing in the coach's voice: plan, focus, one nudge."""
+    ask = (
+        "Good morning, coach. Give me my daily briefing.\n\n"
+        f"My profile: {json.dumps(profile)}\n"
+        f"Today's picture: {context}\n\n"
+        "In your voice, in UNDER 120 words of plain text (no markdown headers): "
+        "1) today's training in one line (from the plan if there is one, or your call), "
+        "2) the nutrition focus with actual numbers, "
+        "3) one specific nudge based on my recent data (vitals, adherence, weigh-ins). "
+        "End with one short line of your signature energy."
+    )
+    if cli_available():
+        return _run_cli(f"{persona}\n\n{ask}", timeout=240)
+    if backend_name():
+        response = _sdk_create(
+            model=CLAUDE_MODEL,
+            max_tokens=8000,
+            system=persona,
+            messages=[{"role": "user", "content": ask}],
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("Claude declined to process this request.")
+        return next(b.text for b in response.content if b.type == "text")
+    raise AIUnavailable(
+        "No Claude backend found. Install Claude Code and log in (uses your "
+        "Claude subscription), or set ANTHROPIC_API_KEY."
+    )
+
+
 def coaching_summary(week_data, persona=None):
     """Weekly coaching write-up (markdown) from the last 7 days of data.
 
