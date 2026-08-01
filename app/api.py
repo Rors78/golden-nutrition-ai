@@ -90,6 +90,7 @@ def get_state():
         'stats': {
             'today': stats.today_summary(d),
             'weight': stats.weight_stats(d),
+            'weight_extras': stats.weight_extras(d),
             'insights': stats.insights(d),
             'progression': stats.progression(d),
             'quick_meals': stats.quick_meals(d),

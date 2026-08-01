@@ -216,6 +216,40 @@ def test_weight_replaces_same_day_and_syncs_profile(client):
     assert state["profile"]["weight"] == 200.5
 
 
+def test_weight_extras_streak_and_milestones(client):
+    assert client.get("/api/state").get_json()["stats"]["weight_extras"] == {"has_data": False}
+    d = [(date.today() - timedelta(days=n)).isoformat() for n in range(5)]
+    # 200 -> 193.8, weighed daily except a gap 3 days ago
+    for day, wt in [(d[4], 200), (d[3], 198.5), (d[1], 195.2), (d[0], 193.8)]:
+        client.post("/api/weights", json={"date": day, "weight": wt})
+    client.post("/api/profile", json={"goal_weight": 185})
+    wx = client.get("/api/state").get_json()["stats"]["weight_extras"]
+    assert wx["streak"] == 2  # the gap 3 days ago broke the run
+    assert wx["cutting"] is True
+    # start 200, goal 185 -> plates at 195, 190, then the goal itself
+    assert [m["target"] for m in wx["milestones"]] == [195, 190, 185]
+    m195 = wx["milestones"][0]
+    assert m195["crossed"] is True and m195["date"] == d[0]  # 193.8 is the first dip under 195
+    assert wx["next_milestone"] == {"target": 190, "to_go": 3.8}
+
+
+def test_weight_weekly_checkins_and_plateau(client):
+    monday = date.today() - timedelta(days=date.today().weekday())
+    for wk_back, avg in [(3, 200.1), (2, 200.0), (1, 200.2), (0, 200.1)]:
+        day = monday - timedelta(weeks=wk_back)
+        client.post("/api/weights", json={"date": day.isoformat(), "weight": avg})
+    client.post("/api/profile", json={"goal_weight": 185})
+    wx = client.get("/api/state").get_json()["stats"]["weight_extras"]
+    assert len(wx["weeks"]) == 4
+    assert wx["weeks"][0]["delta"] is None
+    assert wx["weeks"][1]["delta"] == -0.1
+    assert wx["plateau"] is not None and "plateau" in wx["plateau"]
+    # near the goal, three flat weeks are maintenance, not a plateau
+    client.post("/api/profile", json={"goal_weight": 199})
+    wx = client.get("/api/state").get_json()["stats"]["weight_extras"]
+    assert wx["plateau"] is None
+
+
 def test_checklist_toggle(client):
     client.post("/api/schedule", json={"name": "Creatine", "time": "Morning"})
     r = client.post("/api/checklist/toggle", json={"name": "Creatine", "time": "Morning"})
