@@ -652,6 +652,54 @@ def test_remedies_ask_grounded(client, monkeypatch):
     assert r.status_code == 400  # no matches → honest refusal, no AI call
 
 
+def test_vitals_intelligence(client):
+    token = client.get("/api/state").get_json()["settings"]["ingest_token"]
+    # 7 baseline days: steady, then 3 recent days trending bad
+    days = []
+    for i in range(9, 2, -1):
+        days.append({"date": (date.today() - timedelta(days=i)).isoformat(),
+                     "steps": 9000, "resting_hr": 58, "hrv_ms": 52, "sleep_h": 7.5})
+    for i in range(2, -1, -1):
+        days.append({"date": (date.today() - timedelta(days=i)).isoformat(),
+                     "steps": 4000, "resting_hr": 64, "hrv_ms": 40, "sleep_h": 5.5})
+    client.post(f"/api/ingest?token={token}", json={"days": days})
+
+    vs = client.get("/api/state").get_json()["stats"]["vitals"]
+    # deltas vs 7d avg, direction-aware
+    assert vs["deltas"]["resting_hr"]["diff"] > 0 and vs["deltas"]["resting_hr"]["good"] is False
+    assert vs["deltas"]["sleep_h"]["diff"] < 0 and vs["deltas"]["sleep_h"]["good"] is False
+    # sleep debt: recent 7 logged nights = 4×7.5 + 3×5.5 → debt 3×2.0 = 6.0h
+    assert vs["sleep_debt"]["hours"] == 6.0 and vs["sleep_debt"]["target"] == 7.5
+    # signals: rising RHR (64 vs 58 baseline), suppressed HRV (40 vs 52), sleep debt ≥5h
+    texts = " | ".join(s["text"] for s in vs["signals"])
+    assert "Resting heart rate" in texts
+    assert "HRV is suppressed" in texts
+    assert "sleep debt" in texts
+
+
+def test_vitals_edit_delete_and_export(client):
+    today = date.today().isoformat()
+    client.post("/api/vitals", json={"date": today, "steps": 8000,
+                                     "resting_hr": 60, "sleep_h": 7})
+    # edit: change steps, blank resting_hr (removes the reading), keep sleep
+    r = client.put("/api/entry/vitals/0", json={"date": today, "steps": 8500,
+                                                "resting_hr": "", "sleep_h": 7})
+    assert r.status_code == 200
+    v = client.get("/api/state").get_json()["vitals"][0]
+    assert v["steps"] == 8500 and "resting_hr" not in v and v["sleep_h"] == 7.0
+
+    res = client.get("/api/export/vitals.csv")
+    assert res.status_code == 200 and b"8500" in res.data
+
+    assert client.delete("/api/entry/vitals/0").status_code == 200
+    assert client.get("/api/state").get_json()["vitals"] == []
+
+
+def test_sleep_target_setting(client):
+    client.post("/api/settings", json={"sleep_target": 8.5})
+    assert client.get("/api/state").get_json()["settings"]["sleep_target"] == 8.5
+
+
 def test_pwa_surfaces(client):
     assert client.get("/sw.js").status_code == 200
     assert b"manifest.webmanifest" in client.get("/").data

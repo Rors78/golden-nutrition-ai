@@ -25,6 +25,11 @@ Android Health Connect → an exporter app POSTing to our webhook.
 - The ingest webhook requires the token; 401 without it. Never log the token.
 - Fields: steps, resting_hr, hrv_ms, sleep_h, bp_sys, bp_dia. New fields need
   the alias table, the summary, the UI, and a test — all four.
+- Intelligence layer: trend deltas vs 7d average are direction-aware (RHR down
+  is good, the rest up is good); sleep debt runs against settings.sleep_target;
+  early-warning signals fire on RHR +3 bpm over baseline, HRV ≤85% of baseline,
+  and ≥5h weekly sleep debt — thresholds are pinned in tests, change them
+  deliberately. Editing a vitals row with a blanked field REMOVES that reading.
 - **BP/HR stay informational.** Grading thresholds (elevated 130/80, high
   140/90, urgent 180/120) produce "talk to a professional" copy, never
   diagnosis or medication advice. The disclaimer is not removable.
