@@ -94,7 +94,8 @@ def test_full_week_stats(client):
     assert trn["volume_7d"] == 17400  # sum of 4x10x(70..75)
     assert trn["streak_weeks"] == 1   # this week qualifies, previous doesn't
 
-    assert state["stats"]["checklist"] == [{"name": "Creatine", "time": "Morning", "taken": False}]
+    assert state["stats"]["checklist"] == [
+        {"name": "Creatine", "time": "Morning", "taken": False, "low": False}]
 
 
 def test_meal_lifecycle(client):
@@ -131,6 +132,56 @@ def test_checklist_toggle(client):
     assert client.get("/api/state").get_json()["stats"]["checklist"][0]["taken"] is True
     r = client.post("/api/checklist/toggle", json={"name": "Creatine", "time": "Morning"})
     assert r.get_json()["taken"] is False
+
+
+def test_schedule_dose_and_servings(client):
+    r = client.post("/api/schedule", json={"name": "Creatine", "time": "Morning",
+                                           "dose": "5g", "servings": 60})
+    assert r.status_code == 200
+    item = client.get("/api/state").get_json()["schedule"][0]
+    assert item["dose"] == "5g" and item["servings_left"] == 60
+
+    # ticking consumes a serving; un-ticking gives it back
+    client.post("/api/checklist/toggle", json={"name": "Creatine", "time": "Morning"})
+    assert client.get("/api/state").get_json()["schedule"][0]["servings_left"] == 59
+    client.post("/api/checklist/toggle", json={"name": "Creatine", "time": "Morning"})
+    assert client.get("/api/state").get_json()["schedule"][0]["servings_left"] == 60
+
+    # refill via PUT
+    r = client.put("/api/schedule/0", json={"dose": "10g", "servings": 90})
+    assert r.status_code == 200
+    item = client.get("/api/state").get_json()["schedule"][0]
+    assert item["dose"] == "10g" and item["servings_left"] == 90
+    assert client.put("/api/schedule/99", json={"dose": "x"}).status_code == 404
+
+
+def test_checklist_low_flag(client):
+    client.post("/api/schedule", json={"name": "Fish Oil", "time": "Evening", "servings": 7})
+    client.post("/api/schedule", json={"name": "Creatine", "time": "Morning", "servings": 60})
+    by_name = {c["name"]: c for c in
+               client.get("/api/state").get_json()["stats"]["checklist"]}
+    assert by_name["Fish Oil"]["low"] is True
+    assert by_name["Creatine"]["low"] is False
+
+
+def test_adherence_series(client):
+    assert client.get("/api/state").get_json()["stats"]["adherence_series"] == []
+    client.post("/api/schedule", json={"name": "Creatine", "time": "Morning"})
+    client.post("/api/checklist/toggle", json={"name": "Creatine", "time": "Morning"})
+    series = client.get("/api/state").get_json()["stats"]["adherence_series"]
+    assert len(series) == 30
+    assert series[-1]["date"] == date.today().isoformat()
+    assert series[-1]["pct"] == 100
+    assert series[0]["pct"] == 0
+
+
+def test_briefing_reports_low_supplements(client, monkeypatch):
+    client.post("/api/schedule", json={"name": "Fish Oil", "time": "Evening", "servings": 3})
+    seen = {}
+    monkeypatch.setattr(ai, "daily_briefing",
+                        lambda profile, persona, ctx: seen.update(json.loads(ctx)) or "Rise and grind.")
+    assert client.post("/api/briefing").status_code == 200
+    assert seen["supplements_running_low"] == ["Fish Oil (3 left)"]
 
 
 def test_ai_parse_and_add(client, monkeypatch):
@@ -352,7 +403,7 @@ def test_schedule_accepts_custom_names(client):
     r = client.post("/api/schedule", json={"name": "Creatine Monohydrate", "time": "Morning"})
     assert r.status_code == 200
     assert client.get("/api/state").get_json()["schedule"] == [
-        {"name": "Creatine Monohydrate", "time": "Morning"}]
+        {"name": "Creatine Monohydrate", "time": "Morning", "dose": ""}]
 
 
 def test_meal_suggestions_use_remaining_macros_and_persona(client, monkeypatch):

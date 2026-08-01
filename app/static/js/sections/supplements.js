@@ -1,8 +1,10 @@
 // Supplements: daily checklist from a schedule, manual logging, history.
-import { el, esc, api, toast, refresh, rowActions, barbell } from '../app.js';
+import { el, esc, api, toast, refresh, rowActions, barbell, CHART } from '../app.js';
 
 const SUPPS = ['Multivitamin', 'Protein Shake', 'Creatine', 'Fish Oil', 'Vitamin D', 'BCAAs', 'Pre-Workout', 'Other'];
 const TIMES = ['Morning', 'Afternoon', 'Evening', 'Pre-Workout', 'Post-Workout'];
+// checklist lanes in the order you'd hit them across a training day
+const LANES = ['Morning', 'Afternoon', 'Pre-Workout', 'Post-Workout', 'Evening'];
 
 const TIME_GUESS = [
   [/pre.?(workout|training)/i, 'Pre-Workout'],
@@ -190,9 +192,9 @@ export function renderSupplements(root, state) {
     root.append(lib);
   }
 
-  // ── today's checklist ──
+  // ── today's protocol, grouped by time of day ──
   const checklist = state.stats.checklist;
-  const card = el('<div class="card"><p class="chart-title">Today\'s checklist</p></div>');
+  const card = el('<div class="card"><p class="chart-title">Today\'s protocol</p></div>');
   if (checklist.length) {
     const done = checklist.filter(c => c.taken).length;
     const adh = state.stats.adherence;
@@ -200,21 +202,49 @@ export function renderSupplements(root, state) {
       card.querySelector('.chart-title').insertAdjacentHTML('beforeend',
         ` · <span style="color:${adh.pct >= 80 ? 'var(--good)' : adh.pct >= 50 ? 'var(--ink-2)' : 'var(--warn)'}">${adh.pct}% adherence, 7d</span>`);
     }
-    const list = el('<div class="check-list"></div>');
-    for (const item of checklist) {
-      const node = el(`<button type="button" class="check-item${item.taken ? ' done' : ''}">
-        <span class="box">${item.taken ? '✓' : ''}</span>
-        <span class="check-name">${esc(item.name)} <span style="color:var(--muted);font-size:12px">· ${esc(item.time)}</span></span>
-      </button>`);
-      node.addEventListener('click', async () => {
+
+    // running low? offer the one-tap restock path
+    const low = checklist.filter(c => c.low);
+    if (low.length) {
+      const lowNote = el(`<div class="callout warn" style="margin:10px 0 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <span style="flex:1;min-width:200px">Running low: ${low.map(c =>
+          `${esc(c.name)} (${c.servings_left} left)`).join(', ')}</span>
+        <button class="ghost-btn" type="button" style="flex:0 1 auto;min-height:34px;padding:6px 12px;font-size:12px">Add to shopping list</button>
+      </div>`);
+      lowNote.querySelector('button').addEventListener('click', async () => {
         try {
-          await api('POST', '/checklist/toggle', { name: item.name, time: item.time });
+          await api('POST', '/shopping', { items: [...new Set(low.map(c => c.name))] });
+          toast('Added to the shopping list — Deals tab is ready');
           await refresh();
         } catch (e) { toast(e.message); }
       });
-      list.append(node);
+      card.append(lowNote);
     }
-    card.append(list, barbell('Stack completed', done, checklist.length, ''));
+
+    for (const lane of LANES) {
+      const items = checklist.filter(c => c.time === lane);
+      if (!items.length) continue;
+      card.append(el(`<p style="margin:14px 0 6px;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--steel)">${esc(lane)}</p>`));
+      const list = el('<div class="check-list"></div>');
+      for (const item of items) {
+        const node = el(`<button type="button" class="check-item${item.taken ? ' done' : ''}">
+          <span class="box">${item.taken ? '✓' : ''}</span>
+          <span class="check-name" style="flex:1;text-align:left">${esc(item.name)}
+            ${item.dose ? `<span style="color:var(--gold-bright);font-size:12px;font-family:var(--font-mono)"> ${esc(item.dose)}</span>` : ''}
+            ${item.servings_left != null ? `<span style="display:block;color:${item.low ? 'var(--warn)' : 'var(--muted)'};font-size:11px;font-family:var(--font-mono)">${item.servings_left} servings left</span>` : ''}
+          </span>
+        </button>`);
+        node.addEventListener('click', async () => {
+          try {
+            await api('POST', '/checklist/toggle', { name: item.name, time: item.time });
+            await refresh();
+          } catch (e) { toast(e.message); }
+        });
+        list.append(node);
+      }
+      card.append(list);
+    }
+    card.append(barbell('Stack completed', done, checklist.length, ''));
     const shopStack = el(`<div style="margin-top:10px"><button class="ghost-btn" type="button">Find deals on my stack</button></div>`);
     shopStack.querySelector('button').addEventListener('click', () => {
       sessionStorage.setItem('deals_prefill', [...new Set(schedule.map(i => i.name))].join(', '));
@@ -226,15 +256,31 @@ export function renderSupplements(root, state) {
   }
   root.append(card);
 
-  // ── schedule editor ──
+  // ── adherence trend ──
+  const series = state.stats.adherence_series || [];
+  if (series.length && series.some(x => x.pct > 0)) {
+    const trend = el('<div class="card" style="margin-top:14px"><p class="chart-title">Adherence · last 30 days</p><div class="chart" style="min-height:160px"></div></div>');
+    root.append(trend);
+    Plotly.newPlot(trend.querySelector('.chart'),
+      [{ x: series.map(x => x.date), y: series.map(x => x.pct), type: 'bar',
+         marker: { color: series.map(x => x.pct >= 80 ? '#f2c14e' : '#6e7683'), cornerradius: 3 },
+         hovertemplate: '%{x}<br>%{y}% taken<extra></extra>' }],
+      CHART.layout({ height: 160, bargap: .35, margin: { l: 38, r: 8, t: 6, b: 30 },
+        yaxis: { range: [0, 105], gridcolor: 'rgba(110,118,131,.14)', zeroline: false, fixedrange: true, ticksuffix: '%' } }),
+      CHART.config);
+  }
+
+  // ── schedule editor with dose + inventory ──
   const sched = el(`<div class="card" style="margin-top:14px">
     <p class="chart-title">Daily stack</p>
     <form class="form-row">
       <label>Supplement <select name="name">${SUPPS.map(s => `<option>${s}</option>`).join('')}</select></label>
       <label>Time of day <select name="time">${TIMES.map(t => `<option>${t}</option>`).join('')}</select></label>
+      <label>Dose <input name="dose" type="text" placeholder="5g / 2 caps" style="max-width:110px"></label>
+      <label>Servings in tub <input name="servings" type="number" min="0" placeholder="60" style="max-width:110px"></label>
       <button class="gold-btn" type="submit" style="flex:0 1 auto">Add to stack</button>
     </form>
-    <div class="sched-list" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"></div>
+    <div class="sched-list" style="margin-top:10px;display:grid;gap:8px"></div>
   </div>`);
   sched.querySelector('form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -246,13 +292,31 @@ export function renderSupplements(root, state) {
   });
   const schedList = sched.querySelector('.sched-list');
   state.schedule.forEach((item, idx) => {
-    const chip = el(`<span class="badge" style="display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-2)">
-      ${esc(item.name)} · ${esc(item.time)} <button class="icon-btn danger" style="min-height:auto;padding:0 2px" title="Remove">✕</button></span>`);
-    chip.querySelector('button').addEventListener('click', async () => {
+    const row = el(`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg);padding:8px 12px">
+      <span style="flex:1;min-width:140px;font-size:13px"><strong>${esc(item.name)}</strong>
+        <span style="color:var(--muted)"> · ${esc(item.time)}</span></span>
+      <input type="text" value="${esc(item.dose || '')}" placeholder="dose" data-f="dose"
+        style="max-width:90px;min-height:34px;padding:5px 8px;font-size:12px">
+      <input type="number" value="${item.servings_left ?? ''}" placeholder="servings" data-f="servings" min="0"
+        style="max-width:90px;min-height:34px;padding:5px 8px;font-size:12px">
+      <button class="icon-btn" title="Save dose/servings">✓</button>
+      <button class="icon-btn danger" title="Remove from stack">✕</button>
+    </div>`);
+    row.querySelector('.icon-btn:not(.danger)').addEventListener('click', async () => {
+      try {
+        await api('PUT', `/schedule/${idx}`, {
+          dose: row.querySelector('[data-f="dose"]').value,
+          servings: row.querySelector('[data-f="servings"]').value,
+        });
+        toast('Stack item updated');
+        await refresh();
+      } catch (e) { toast(e.message); }
+    });
+    row.querySelector('.danger').addEventListener('click', async () => {
       try { await api('DELETE', `/schedule/${idx}`); toast('Removed'); await refresh(); }
       catch (e) { toast(e.message); }
     });
-    schedList.append(chip);
+    schedList.append(row);
   });
   root.append(sched);
 

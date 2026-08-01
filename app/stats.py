@@ -584,5 +584,23 @@ def checklist(data):
         taken = any(s['date'] == today and s['name'] == item['name']
                     and s['time'] == item['time'] and s.get('taken')
                     for s in data['supplements'])
-        items.append({**item, 'taken': taken})
+        left = item.get('servings_left')
+        items.append({**item, 'taken': taken,
+                      'low': left is not None and left <= 7})
     return items
+
+
+def adherence_series(data, days=30):
+    """Per-day stack adherence % for the trend chart (assumes today's schedule)."""
+    schedule = data.get('supplement_schedule', [])
+    if not schedule:
+        return []
+    out = []
+    for i in range(days - 1, -1, -1):
+        day = (date.today() - timedelta(days=i)).isoformat()
+        taken = sum(1 for item in schedule
+                    if any(s['date'] == day and s['name'] == item['name']
+                           and s['time'] == item['time'] and s.get('taken')
+                           for s in data['supplements']))
+        out.append({'date': day, 'pct': round(taken / len(schedule) * 100)})
+    return out

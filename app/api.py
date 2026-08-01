@@ -95,6 +95,7 @@ def get_state():
             'quick_meals': stats.quick_meals(d),
             'checklist': stats.checklist(d),
             'adherence': stats.supplement_adherence(d),
+            'adherence_series': stats.adherence_series(d),
             'training': stats.training_summary(d),
             'vitals': stats.vitals_summary(d),
             'readiness': stats.readiness(d),
@@ -411,6 +412,10 @@ def briefing():
                   'calories': d['profile'].get('daily_calories'),
                   'steps': d['settings'].get('daily_steps')},
         'stack_adherence_7d': stats.supplement_adherence(d),
+        'supplements_running_low': [f"{i['name']} ({i['servings_left']} left)"
+                                    for i in d['supplement_schedule']
+                                    if i.get('servings_left') is not None
+                                    and i['servings_left'] <= 7],
         'latest_weight': (sorted(d['weights'], key=lambda w: w['date'])[-1]
                           if d['weights'] else None),
     })
@@ -488,15 +493,42 @@ def log_supplement():
 @bp.post('/schedule')
 def add_schedule():
     body = request.get_json(force=True)
-    entry = {'name': str(body.get('name', '')).strip(), 'time': str(body.get('time', '')).strip()}
-    if not entry['name'] or not entry['time']:
+    name = str(body.get('name', '')).strip()
+    time_of_day = str(body.get('time', '')).strip()
+    if not name or not time_of_day:
         return _err('Name and time are required.')
     d = store.load()
-    if entry in d['supplement_schedule']:
+    if any(i['name'] == name and i['time'] == time_of_day
+           for i in d['supplement_schedule']):
         return _err('Already on the schedule.')
+    entry = {'name': name, 'time': time_of_day,
+             'dose': str(body.get('dose', '')).strip()}
+    servings = clean_num(body.get('servings'))
+    if servings > 0:
+        entry['servings_left'] = servings
     d['supplement_schedule'].append(entry)
     store.save(d)
     return jsonify({'ok': True})
+
+
+@bp.put('/schedule/<int:idx>')
+def update_schedule(idx):
+    """Edit dose or restock servings on a stack item."""
+    body = request.get_json(force=True)
+    d = store.load()
+    if not 0 <= idx < len(d['supplement_schedule']):
+        return _err('No such schedule item.', 404)
+    item = d['supplement_schedule'][idx]
+    if 'dose' in body:
+        item['dose'] = str(body['dose']).strip()
+    if 'servings' in body:
+        servings = clean_num(body['servings'])
+        if servings > 0:
+            item['servings_left'] = servings
+        else:
+            item.pop('servings_left', None)
+    store.save(d)
+    return jsonify({'ok': True, 'item': item})
 
 
 @bp.delete('/schedule/<int:idx>')
@@ -601,10 +633,16 @@ def toggle_checklist():
     match = [s for s in d['supplements']
              if s['date'] == today and s['name'] == name
              and s['time'] == time_of_day and s.get('taken')]
+    sched = next((i for i in d['supplement_schedule']
+                  if i['name'] == name and i['time'] == time_of_day), None)
     if match:
         d['supplements'] = [s for s in d['supplements'] if s not in match]
+        if sched and sched.get('servings_left') is not None:
+            sched['servings_left'] += 1  # un-ticking puts the serving back
     else:
         d['supplements'].append({'date': today, 'name': name, 'time': time_of_day, 'taken': True})
+        if sched and sched.get('servings_left') is not None:
+            sched['servings_left'] = max(0, sched['servings_left'] - 1)
     store.save(d)
     return jsonify({'ok': True, 'taken': not match})
 
