@@ -751,6 +751,44 @@ def test_readiness_engine(client):
     assert rd["score"] == 83 and rd["level"] == "primed"
 
 
+def test_readiness_series_and_vitals_weeks(client):
+    token = client.get("/api/state").get_json()["settings"]["ingest_token"]
+    days = [{"date": (date.today() - timedelta(days=i)).isoformat(),
+             "sleep_h": 7.5, "hrv_ms": 50, "resting_hr": 60, "steps": 9000}
+            for i in range(1, 6)]
+    days.append({"date": date.today().isoformat(),
+                 "sleep_h": 6.0, "hrv_ms": 40, "resting_hr": 66, "steps": 4000})
+    client.post(f"/api/ingest?token={token}", json={"days": days})
+    st = client.get("/api/state").get_json()["stats"]
+
+    series = st["readiness_series"]
+    assert len(series) == 6
+    assert series[-1]["date"] == date.today().isoformat()
+    # today's entry scores against the flat 5-day baseline: .8*40 + .8*35 + (60/66)*25
+    assert series[-1]["score"] == 83
+    # a flat baseline day scores 100 on hrv/rhr and 100 on sleep (7.5 vs 7.5 target)
+    assert series[1]["score"] == 100
+
+    weeks = st["vitals_weeks"]
+    assert 1 <= len(weeks) <= 2
+    total_n = sum(w["n"] for w in weeks)
+    assert total_n == 6
+    assert weeks[0]["week_start"] <= date.today().isoformat()
+    if len(weeks) == 2:
+        assert weeks[1]["resting_hr_delta"] is not None
+
+
+def test_step_stats(client):
+    token = client.get("/api/state").get_json()["settings"]["ingest_token"]
+    d = [(date.today() - timedelta(days=n)).isoformat() for n in range(4)]
+    # goal defaults to 8000: hit, hit, miss, hit (oldest->newest: d3 hit, d2 miss, d1 hit, d0 hit)
+    client.post(f"/api/ingest?token={token}", json={"days": [
+        {"date": d[3], "steps": 9000}, {"date": d[2], "steps": 5000},
+        {"date": d[1], "steps": 8000}, {"date": d[0], "steps": 12000}]})
+    ss = client.get("/api/state").get_json()["stats"]["step_stats"]
+    assert ss == {"has_goal": True, "goal": 8000, "streak": 2, "hits_14": 3}
+
+
 def test_achievements_wall(client):
     seed(week_of_data())
     badges = {b["id"]: b for b in client.get("/api/state").get_json()["stats"]["achievements"]}

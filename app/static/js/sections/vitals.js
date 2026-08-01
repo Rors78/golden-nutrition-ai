@@ -73,6 +73,26 @@ export function renderVitals(root, state) {
       root.append(card);
     }
 
+    // ── readiness trend, 28 days ──
+    const rSeries = state.stats.readiness_series || [];
+    if (rSeries.length > 2) {
+      const rtCard = el(`<div class="card" style="margin-top:14px">
+        <p class="chart-title">Readiness · last 28 days</p>
+        <div class="chart" style="min-height:190px"></div></div>`);
+      root.append(rtCard);
+      const band = (y0, y1, color) => ({ type: 'rect', xref: 'paper', x0: 0, x1: 1, y0, y1,
+        fillcolor: color, opacity: 0.06, line: { width: 0 }, layer: 'below' });
+      Plotly.newPlot(rtCard.querySelector('.chart'),
+        [{ x: rSeries.map(r => r.date), y: rSeries.map(r => r.score),
+           mode: 'lines+markers', line: { color: CHART.gold, width: 2, shape: 'spline' },
+           marker: { size: 6, color: rSeries.map(r => r.score >= 80 ? '#3ec97e' : r.score >= 60 ? '#f2c14e' : r.score >= 40 ? '#8b93a1' : '#e07a4f') },
+           hovertemplate: '%{x}<br>readiness %{y}<extra></extra>' }],
+        CHART.layout({ height: 190, margin: { l: 38, r: 10, t: 6, b: 30 },
+          yaxis: { range: [0, 105], gridcolor: 'rgba(110,118,131,.14)', zeroline: false, fixedrange: true },
+          shapes: [band(80, 105, '#3ec97e'), band(60, 80, '#f2c14e'), band(0, 40, '#e07a4f')] }),
+        CHART.config);
+    }
+
     // ── early-warning signals ──
     for (const s of vs.signals || []) {
       root.append(el(`<div class="callout ${s.level === 'good' ? 'good' : 'warn'}" style="margin-top:10px">${esc(s.text)}</div>`));
@@ -92,6 +112,10 @@ export function renderVitals(root, state) {
         { ...opts, delta, small: `${opts.small || ''}${opts.small ? ' · ' : ''}${entry.date}` }));
     };
     add('Steps', L.steps, 'steps', { small: `goal ${vs.steps_goal}` });
+    const ss = state.stats.step_stats;
+    if (ss?.has_goal) {
+      grid.append(metric('Step-goal streak', ss.streak, { suffix: 'd', small: `${ss.hits_14}/14 days hit` }));
+    }
     add('Resting HR', L.resting_hr, 'resting_hr', { suffix: ' bpm' });
     add('HRV', L.hrv_ms, 'hrv_ms', { suffix: ' ms' });
     add('Sleep', L.sleep_h, 'sleep_h', { suffix: ' h' });
@@ -158,6 +182,36 @@ export function renderVitals(root, state) {
            mode: 'lines+markers', line: { color: CHART.steel, width: 2 }, marker: { size: 6 },
            hovertemplate: '%{x}<br>%{y} mmHg<extra>diastolic</extra>' }]);
     }
+    // ── weekly recovery report ──
+    const vweeks = state.stats.vitals_weeks || [];
+    if (vweeks.length > 1) {
+      const GOODUP = { steps: true, resting_hr: false, hrv_ms: true, sleep_h: true };
+      const rep = el(`<div class="card" style="margin-top:14px">
+        <p class="chart-title">Weekly recovery report</p>
+        <div class="table-wrap" style="margin-top:8px"><table>
+          <thead><tr><th>Week of</th><th class="num">Steps</th><th class="num">RHR</th>
+            <th class="num">HRV</th><th class="num">Sleep</th><th class="num">Days</th></tr></thead>
+          <tbody></tbody></table></div></div>`);
+      const tb = rep.querySelector('tbody');
+      const cell = (row, f, fmt = x => x) => {
+        if (row[f] == null) return '<td class="num" style="color:var(--muted)">—</td>';
+        const d = row[`${f}_delta`];
+        let deltaHtml = '';
+        if (d != null && d !== 0) {
+          const good = (d > 0) === GOODUP[f];
+          deltaHtml = ` <span style="font-size:10px;color:${good ? 'var(--good)' : 'var(--warn)'}">${d > 0 ? '▲' : '▼'}${Math.abs(d)}</span>`;
+        }
+        return `<td class="num">${fmt(row[f])}${deltaHtml}</td>`;
+      };
+      for (const row of [...vweeks].reverse()) {
+        tb.append(el(`<tr><td>${esc(row.week_start)}</td>
+          ${cell(row, 'steps', x => Math.round(x).toLocaleString())}
+          ${cell(row, 'resting_hr')}${cell(row, 'hrv_ms')}${cell(row, 'sleep_h')}
+          <td class="num" style="color:var(--muted)">${row.n}</td></tr>`));
+      }
+      root.append(rep);
+    }
+
     // ── history, editable ──
     root.append(el('<p class="chart-title" style="margin:18px 0 8px">History · last 14 days</p>'));
     const indexed = state.vitals.map((v, idx) => ({ v, idx })).slice(-14).reverse();
