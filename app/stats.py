@@ -40,26 +40,72 @@ def weight_stats(data):
         if days > 0:
             rate_per_week = round((trend[-1]['weight'] - trend[0]['weight']) / days * 7, 2)
 
-    eta, eta_days, off_track = None, None, False
+    eta, eta_days, eta_date_iso, off_track = None, None, None, False
     if goal and rate_per_week is not None and abs(rate_per_week) >= 0.05:
         to_go = goal - current
         if to_go != 0 and (to_go < 0) == (rate_per_week < 0):
             eta_days = round(abs(to_go / (rate_per_week / 7)))
-            eta = (date.today() + timedelta(days=eta_days)).strftime('%B %d, %Y')
+            eta_d = date.today() + timedelta(days=eta_days)
+            eta = eta_d.strftime('%B %d, %Y')
+            eta_date_iso = eta_d.isoformat()
         elif to_go != 0:
             off_track = True
+
+    # 7-day rolling average: the signal under the daily noise
+    series_avg = []
+    for w in weights:
+        start = (date.fromisoformat(w['date']) - timedelta(days=6)).isoformat()
+        vals = [x['weight'] for x in weights if start <= x['date'] <= w['date']]
+        series_avg.append({'date': w['date'], 'avg': round(sum(vals) / len(vals), 2)})
+
+    # Pace verdict: rate as % of bodyweight per week
+    pace = None
+    if rate_per_week is not None and current:
+        pct = abs(rate_per_week) / current * 100
+        direction = 'losing' if rate_per_week < 0 else 'gaining'
+        if pct < 0.25:
+            pace = {'level': 'info',
+                    'text': f"{direction.capitalize()} {abs(rate_per_week):.1f} lbs/week "
+                            f"({pct:.2f}% of bodyweight) — maintenance territory."}
+        elif pct <= 1.0:
+            pace = {'level': 'good',
+                    'text': f"{direction.capitalize()} {abs(rate_per_week):.1f} lbs/week "
+                            f"({pct:.2f}% of bodyweight) — a healthy, sustainable pace."}
+        elif pct <= 1.5:
+            pace = {'level': 'warn',
+                    'text': f"{direction.capitalize()} {abs(rate_per_week):.1f} lbs/week "
+                            f"({pct:.2f}% of bodyweight) — aggressive. Guard sleep, protein, and strength."}
+        else:
+            pace = {'level': 'warn',
+                    'text': f"{direction.capitalize()} {abs(rate_per_week):.1f} lbs/week "
+                            f"({pct:.2f}% of bodyweight) — too fast to hold muscle. Ease off."}
+
+    # BMI (context only — needs height on the profile)
+    bmi = None
+    height_in = data['profile'].get('height_in', 0)
+    if height_in and current:
+        val = round(703 * current / (height_in ** 2), 1)
+        cat = ('underweight' if val < 18.5 else 'normal range' if val < 25
+               else 'overweight range' if val < 30 else 'obese range')
+        bmi = {'value': val, 'category': cat}
 
     return {
         'has_data': True,
         'current': current,
         'goal': goal,
         'change_7d': change_7d,
+        'total_change': round(current - weights[0]['weight'], 1),
+        'since': weights[0]['date'],
         'rate_per_week': rate_per_week,
+        'pace': pace,
+        'bmi': bmi,
         'eta': eta,
         'eta_days': eta_days,
+        'eta_date_iso': eta_date_iso,
         'off_track': off_track,
         'cutting': bool(goal and goal < current),
         'series': weights,
+        'series_avg': series_avg,
     }
 
 

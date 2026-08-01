@@ -10,6 +10,7 @@ DEFAULT_DATA = {
         'name': '',
         'age': 0,
         'sex': '',
+        'height_in': 0,
         'weight': 0,
         'goal_weight': 0,
         'daily_protein_g': 150,

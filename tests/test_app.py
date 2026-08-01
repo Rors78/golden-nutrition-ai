@@ -29,6 +29,7 @@ def seed(client_dir_data):
 def week_of_data():
     data = {
         "profile": {"name": "Test", "weight": 200, "goal_weight": 185,
+                    "height_in": 70,
                     "daily_protein_g": 150, "daily_calories": 2200},
         "meals": [], "workouts": [], "supplements": [],
         "supplement_schedule": [{"name": "Creatine", "time": "Morning"}],
@@ -75,6 +76,11 @@ def test_full_week_stats(client):
     assert w["current"] == 200.0
     assert w["rate_per_week"] == -1.4  # losing 0.2/day
     assert w["eta_days"] == 75
+    assert w["total_change"] == -1.0
+    assert w["series_avg"][-1]["avg"] == 200.5  # mean of the 6 seeded entries
+    assert w["pace"]["level"] == "good"         # 0.7% BW/week: sustainable
+    assert w["bmi"] == {"value": 28.7, "category": "overweight range"}
+    assert w["eta_date_iso"] is not None
 
     prog = state["stats"]["progression"]["Incline Dumbbell Press"]
     assert max(p["top"] for p in prog) == 75

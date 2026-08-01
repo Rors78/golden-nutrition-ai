@@ -39,8 +39,20 @@ export function renderWeight(root, state) {
       { suffix: w.goal ? ' lbs' : '', small: w.goal ? `goal ${w.goal}` : 'set in Profile' }),
     metric('Trend', w.rate_per_week ?? '—',
       { suffix: w.rate_per_week != null ? ' lbs/wk' : '', small: '30-day' }),
+    metric('Total change', `${w.total_change > 0 ? '+' : ''}${w.total_change}`,
+      { suffix: ' lbs', small: `since ${w.since}` }),
   );
+  if (w.bmi) {
+    grid.append(metric('BMI', w.bmi.value, { small: w.bmi.category }));
+  } else {
+    grid.append(metric('BMI', '—', { small: 'add height in Profile' }));
+  }
   root.append(grid);
+
+  if (w.pace) {
+    root.append(el(`<div class="callout ${w.pace.level === 'good' ? 'good' : w.pace.level === 'warn' ? 'warn' : ''}"
+      style="margin-top:14px">${esc(w.pace.text)}</div>`));
+  }
 
   if (w.eta) {
     root.append(el(`<div class="callout good" style="margin-top:14px">At ${w.rate_per_week > 0 ? '+' : ''}${w.rate_per_week} lbs/week
@@ -50,15 +62,33 @@ export function renderWeight(root, state) {
       is moving away from your ${esc(w.goal)} lbs goal.</div>`));
   }
 
-  const chartCard = el('<div class="card" style="margin-top:14px"><p class="chart-title">Weight over time</p><div class="chart" id="weight-chart"></div></div>');
+  const chartCard = el(`<div class="card" style="margin-top:14px">
+    <p class="chart-title">Weight over time</p>
+    <p style="color:var(--muted);font-size:12px;margin:4px 0 0">
+      <span style="color:var(--gold)">●</span> daily &nbsp;
+      <span style="color:var(--steel)">—</span> 7-day average &nbsp;
+      ${w.eta_date_iso ? '<span style="color:var(--good)">┄</span> projection to goal' : ''}</p>
+    <div class="chart" id="weight-chart"></div></div>`);
   root.append(chartCard);
   const dates = w.series.map(x => x.date);
   const vals = w.series.map(x => x.weight);
-  const traces = [{
-    x: dates, y: vals, mode: 'lines+markers', name: 'Weight',
-    line: { color: CHART.gold, width: 2 }, marker: { size: 7, color: CHART.gold },
-    hovertemplate: '%{x}<br>%{y:.1f} lbs<extra></extra>',
-  }];
+  const traces = [
+    { x: dates, y: vals, mode: 'markers', name: 'Daily',
+      marker: { size: 6, color: CHART.gold, opacity: 0.75 },
+      hovertemplate: '%{x}<br>%{y:.1f} lbs<extra>daily</extra>' },
+    { x: w.series_avg.map(x => x.date), y: w.series_avg.map(x => x.avg),
+      mode: 'lines', name: '7-day avg',
+      line: { color: CHART.steel, width: 2, shape: 'spline' },
+      hovertemplate: '%{x}<br>%{y:.1f} lbs<extra>7-day avg</extra>' },
+  ];
+  if (w.eta_date_iso) {
+    traces.push({
+      x: [dates[dates.length - 1], w.eta_date_iso], y: [w.current, w.goal],
+      mode: 'lines', name: 'Projection',
+      line: { color: CHART.good, width: 1.5, dash: 'dash' },
+      hovertemplate: '%{x}<br>%{y:.1f} lbs<extra>projected</extra>',
+    });
+  }
   const layout = CHART.layout();
   if (w.goal) {
     layout.shapes = [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: w.goal, y1: w.goal,

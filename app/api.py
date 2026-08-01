@@ -60,6 +60,7 @@ def save_profile():
         'name': str(body.get('name', '')),
         'age': clean_num(body.get('age')),
         'sex': str(body.get('sex', '')),
+        'height_in': clean_num(body.get('height_in')),
         'weight': clean_num(body.get('weight'), float),
         'goal_weight': clean_num(body.get('goal_weight'), float),
         'daily_protein_g': clean_num(body.get('daily_protein_g')),
