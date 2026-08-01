@@ -76,6 +76,8 @@ def get_state():
         'settings': d['settings'],
         'briefing': d.get('briefing'),
         'deals': d.get('deals'),
+        'shopping_list': d.get('shopping_list', []),
+        'watches': d.get('watches', []),
         'supp_advice': d.get('supp_advice'),
         'kb': KB,
         'remedies_unlocked': bool(d['settings'].get('remedies_unlocked')),
@@ -601,6 +603,18 @@ def toggle_checklist():
     return jsonify({'ok': True, 'taken': not match})
 
 
+def _parse_price(text):
+    """'$49.99', '£1,299', '2 for $30' → first numeric price found, or None."""
+    import re
+    m = re.search(r'(\d{1,3}(?:,\d{3})*(?:\.\d+)?)', str(text))
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(',', ''))
+    except ValueError:
+        return None
+
+
 @bp.post('/deals')
 def deals():
     body = request.get_json(force=True)
@@ -615,8 +629,121 @@ def deals():
     d = store.load()
     d['deals'] = {'fetched_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
                   'items': items, 'location': location, 'results': found}
+    d['settings']['deals_location'] = location  # remember store preferences
     store.save(d)
     return jsonify(d['deals'])
+
+
+@bp.post('/shopping')
+def shopping_add():
+    body = request.get_json(force=True)
+    items = body.get('items') if isinstance(body.get('items'), list) else [body.get('item')]
+    d = store.load()
+    added = 0
+    existing = {i.lower() for i in d['shopping_list']}
+    for raw in items:
+        item = str(raw or '').strip()
+        if item and item.lower() not in existing:
+            d['shopping_list'].append(item)
+            existing.add(item.lower())
+            added += 1
+    if not added:
+        return _err('Nothing new to add.')
+    store.save(d)
+    return jsonify({'ok': True, 'added': added})
+
+
+@bp.delete('/shopping/<int:idx>')
+def shopping_remove(idx):
+    d = store.load()
+    if not 0 <= idx < len(d['shopping_list']):
+        return _err('No such item.', 404)
+    d['shopping_list'].pop(idx)
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.post('/watches')
+def watch_add():
+    body = request.get_json(force=True)
+    item = str(body.get('item', '')).strip()
+    if not item:
+        return _err('Watch needs an item name.')
+    d = store.load()
+    if any(w['item'].lower() == item.lower() for w in d['watches']):
+        return _err('Already watching that item.')
+    price_num = _parse_price(body.get('price'))
+    point = None
+    if price_num is not None:
+        point = {'date': date.today().isoformat(), 'price': price_num,
+                 'raw': str(body.get('price', '')),
+                 'store': str(body.get('store', '')), 'url': str(body.get('url', ''))}
+    d['watches'].append({'item': item, 'created': date.today().isoformat(),
+                         'history': [point] if point else []})
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.delete('/watches/<int:idx>')
+def watch_remove(idx):
+    d = store.load()
+    if not 0 <= idx < len(d['watches']):
+        return _err('No such watch.', 404)
+    d['watches'].pop(idx)
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.post('/watches/recheck')
+def watches_recheck():
+    """Re-search every watched item, record price points, push on drops.
+    Called from the UI or scripts/price_watch.py on a timer."""
+    d = store.load()
+    if not d['watches']:
+        return _err('No price watches yet — watch a deal first.')
+    items = ', '.join(w['item'] for w in d['watches'])
+    try:
+        found = ai.find_deals(items, d['settings'].get('deals_location', ''))
+    except Exception as e:
+        return _err(e, 502)
+
+    def match(watch):
+        tokens = [t for t in watch['item'].lower().split() if len(t) > 2]
+        best, best_score = None, 0
+        for deal in found:
+            hay = f"{deal['item']}".lower()
+            score = sum(1 for t in tokens if t in hay)
+            if score > best_score:
+                best, best_score = deal, score
+        return best if best_score else None
+
+    today = date.today().isoformat()
+    drops, updated = [], 0
+    for w in d['watches']:
+        deal = match(w)
+        if not deal:
+            continue
+        price_num = _parse_price(deal.get('price'))
+        if price_num is None:
+            continue
+        prev_best = min((p['price'] for p in w['history']), default=None)
+        w['history'] = [p for p in w['history'] if p['date'] != today]
+        w['history'].append({'date': today, 'price': price_num,
+                             'raw': deal.get('price', ''),
+                             'store': deal.get('store', ''), 'url': deal.get('url', '')})
+        w['history'] = w['history'][-60:]  # keep two months of points
+        updated += 1
+        if prev_best is not None and price_num < prev_best * 0.98:
+            drops.append({'item': w['item'], 'price': deal.get('price', ''),
+                          'store': deal.get('store', ''), 'was': prev_best})
+    store.save(d)
+    if drops:
+        lines = '; '.join(f"{x['item']} now {x['price']} at {x['store']}" for x in drops)
+        try:
+            notify.push(d['settings'], 'Price drop on your watchlist', lines, priority='high')
+        except Exception:
+            pass
+    return jsonify({'ok': True, 'updated': updated, 'drops': drops})
 
 
 @bp.post('/coach')

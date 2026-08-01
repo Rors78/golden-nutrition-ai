@@ -23,6 +23,8 @@ DEFAULT_DATA = {
     'supplement_schedule': [],
     'weights': [],
     'vitals': [],
+    'shopping_list': [],
+    'watches': [],
     'settings': {
         'ntfy_server': 'https://ntfy.sh',
         'ntfy_topic': '',
