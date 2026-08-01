@@ -14,10 +14,18 @@ content with the respect that origin deserves.
 **Your files:**
 - `app/remedies/*.json` — the distilled archive (source of truth: the user's
   research in ~/Downloads/remedies-research; re-distill from there, never invent entries)
-- `app/remedies_kb.py` — loader, cross-tradition merge, `search_kb()`, stats
-- `app/api.py` → `/api/remedies`, `/api/remedies/ask`, `/api/remedies/unlock`
+- `app/remedies_kb.py` — loader, cross-tradition merge, `search_kb()`, stats,
+  `remedy_of_day()` (deterministic daily pick from the 4★+ shelf — date-keyed,
+  never random)
+- `app/api.py` → `/api/remedies`, `/api/remedies/ask`, `/api/remedies/unlock`,
+  `/api/remedies/cabinet` (+DELETE — `remedy_cabinet` ids in the data file; every
+  cabinet route is behind the same lock)
 - `app/ai.py` → `remedy_answer()` + `APOTHECARY_PROMPT`
-- `app/static/js/sections/remedies.js` — gate, ask box, search/filter browse
+- `app/static/js/sections/remedies.js` — gate, remedy-of-day card, ask box,
+  search/filter browse, My Cabinet chip, interaction sentinel (`MED_CLASSES`
+  keyword match of profile notes vs remedy safety text — awareness flags with
+  "ask a pharmacist" copy, never advice; extend the keyword lists, don't turn
+  it into diagnosis)
 
 **Non-negotiable rules:**
 1. **Complementary, never alternative.** Every surface repeats it; the AI prompt

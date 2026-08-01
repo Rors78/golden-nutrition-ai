@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request, Response
 from . import ai, data as store, notify, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
 from .data import clean_num
-from .remedies_kb import kb_stats, load_kb, search_kb
+from .remedies_kb import kb_stats, load_kb, remedy_of_day, search_kb
 from .supplement_kb import KB
 
 bp = Blueprint('api', __name__, url_prefix='/api')
@@ -82,6 +82,9 @@ def get_state():
         'kb': KB,
         'remedies_unlocked': bool(d['settings'].get('remedies_unlocked')),
         'remedies_stats': kb_stats(),
+        'remedy_cabinet': d.get('remedy_cabinet', []),
+        'remedy_of_day': (remedy_of_day()
+                          if d['settings'].get('remedies_unlocked') else None),
         'coaches': ROSTER,
         'coach': d['profile'].get('coach', DEFAULT_COACH),
         'coach_chat': d.get('coach_chat', []),
@@ -627,6 +630,32 @@ def remedies():
     if _remedies_locked(d):
         return _err('The Apothecary is locked.', 403)
     return jsonify({'remedies': load_kb(), **kb_stats()})
+
+
+@bp.post('/remedies/cabinet')
+def cabinet_add():
+    d = store.load()
+    if _remedies_locked(d):
+        return _err('The Apothecary is locked.', 403)
+    rid = str(request.get_json(force=True).get('id', '')).strip()
+    if not any(r['id'] == rid for r in load_kb()):
+        return _err('No such remedy in the archive.', 404)
+    if rid not in d['remedy_cabinet']:
+        d['remedy_cabinet'].append(rid)
+        store.save(d)
+    return jsonify({'ok': True, 'cabinet': d['remedy_cabinet']})
+
+
+@bp.delete('/remedies/cabinet/<rid>')
+def cabinet_remove(rid):
+    d = store.load()
+    if _remedies_locked(d):
+        return _err('The Apothecary is locked.', 403)
+    if rid not in d['remedy_cabinet']:
+        return _err('Not in your cabinet.', 404)
+    d['remedy_cabinet'].remove(rid)
+    store.save(d)
+    return jsonify({'ok': True, 'cabinet': d['remedy_cabinet']})
 
 
 @bp.post('/remedies/ask')

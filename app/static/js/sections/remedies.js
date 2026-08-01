@@ -13,6 +13,28 @@ const CATEGORY_LABELS = {
 
 const stars = n => `<span style="color:var(--gold-bright);letter-spacing:2px">${'★'.repeat(n)}</span><span style="color:var(--line);letter-spacing:2px">${'★'.repeat(5 - n)}</span>`;
 
+// Interaction sentinel: med classes recognized in profile notes, matched
+// against each remedy's safety text. Awareness flags, never advice.
+const MED_CLASSES = [
+  { label: 'blood thinners', notes: ['warfarin', 'blood thinner', 'anticoagulant', 'eliquis', 'xarelto', 'aspirin', 'clopidogrel'],
+    safety: ['blood thin', 'anticoagulant', 'warfarin', 'bleeding', 'clotting'] },
+  { label: 'blood-pressure meds', notes: ['blood pressure', 'hypertension', 'lisinopril', 'amlodipine', 'losartan', 'bp med'],
+    safety: ['blood pressure', 'hypotens', 'hypertens', 'bp med'] },
+  { label: 'diabetes meds', notes: ['diabetes', 'metformin', 'insulin', 'glipizide'],
+    safety: ['blood sugar', 'diabet', 'hypoglyc', 'insulin', 'glucose'] },
+  { label: 'antidepressants', notes: ['antidepressant', 'ssri', 'sertraline', 'prozac', 'fluoxetine', 'zoloft', 'maoi'],
+    safety: ['ssri', 'antidepress', 'serotonin', 'maoi', 'sedat'] },
+];
+
+function interactionFlags(notes, remedy) {
+  const n = (notes || '').toLowerCase();
+  if (!n) return [];
+  const s = (remedy.safety || '').toLowerCase();
+  return MED_CLASSES
+    .filter(c => c.notes.some(k => n.includes(k)) && c.safety.some(k => s.includes(k)))
+    .map(c => c.label);
+}
+
 export function renderRemedies(root, state) {
   const s = state.remedies_stats || {};
   root.append(el('<h2 class="section-title">The Apothecary</h2>'));
@@ -46,8 +68,23 @@ export function renderRemedies(root, state) {
     return;
   }
 
+  // ── remedy of the day ──
+  const rod = state.remedy_of_day;
+  if (rod) {
+    root.append(el(`<div class="card" style="border-left:4px solid var(--gold)">
+      <p class="chart-title">From the shelf today</p>
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline;margin-top:8px">
+        <strong style="font-size:15px">${esc(rod.name)}</strong>
+        <span style="font-size:11px">${stars(rod.evidence)}
+          <span style="color:var(--steel);margin-left:8px">${rod.traditions.map(esc).join(' · ')}</span></span>
+      </div>
+      <p style="color:var(--ink-2);font-size:13px;margin:6px 0 4px">${esc(rod.summary)}</p>
+      <p style="color:var(--muted);font-size:12px;margin:0">${esc(rod.how)}</p>
+    </div>`));
+  }
+
   // ── ask the apothecary ──
-  const askCard = el(`<div class="card">
+  const askCard = el(`<div class="card"${rod ? ' style="margin-top:14px"' : ''}>
     <p class="chart-title">Ask the Apothecary ${state.ai_backend ? `· ${esc(state.ai_backend)}` : ''}</p>
     <p style="color:var(--ink-2);font-size:13px;margin:8px 0">Answers come only from this archive, graded honestly,
       and checked against your profile notes for interactions.</p>
@@ -94,41 +131,72 @@ export function renderRemedies(root, state) {
   let all = [];
   let activeCat = 'all';
   const LIMIT = 40;
+  const cabinet = new Set(state.remedy_cabinet || []);
+  const notes = state.profile?.notes || '';
 
   function renderList() {
     const q = searchIn.value.trim().toLowerCase();
     const filtered = all.filter(r =>
-      (activeCat === 'all' || r.categories.includes(activeCat)) &&
+      (activeCat === 'all' || (activeCat === 'cabinet' ? cabinet.has(r.id) : r.categories.includes(activeCat))) &&
       (!q || `${r.name} ${r.aka} ${r.summary} ${r.traditions.join(' ')}`.toLowerCase().includes(q)));
     countEl.textContent = `${filtered.length} remedies${filtered.length > LIMIT ? ` — showing the ${LIMIT} strongest-evidence first, refine to narrow` : ''}`;
     listEl.innerHTML = '';
     for (const r of filtered.slice(0, LIMIT)) {
-      listEl.append(el(`<details style="border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg)">
+      const flags = interactionFlags(notes, r);
+      const saved = cabinet.has(r.id);
+      const row = el(`<details style="border:1px solid ${saved ? 'var(--gold-dim)' : 'var(--line)'};border-radius:var(--radius-sm);background:var(--bg)">
         <summary style="display:flex;align-items:center;gap:12px;padding:12px 14px;cursor:pointer;list-style:none;flex-wrap:wrap">
           <span style="flex:1;min-width:200px"><strong>${esc(r.name)}</strong>
             ${r.aka ? `<span style="color:var(--muted);font-size:12px"> · ${esc(r.aka)}</span>` : ''}
+            ${flags.length ? `<span title="Your profile notes mention ${esc(flags.join(', '))} — read the safety section" style="font-size:10px;font-weight:800;letter-spacing:.06em;color:var(--warn);border:1px solid var(--warn);border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:middle">CHECK INTERACTIONS</span>` : ''}
             <span style="display:block;color:var(--ink-2);font-size:12px;margin-top:2px">${esc(r.summary)}</span></span>
           <span style="text-align:right;font-size:11px">${stars(r.evidence)}<br>
             <span style="color:var(--steel)">${r.traditions.map(esc).join(' · ')}</span></span>
         </summary>
         <div style="padding:0 14px 14px;display:grid;gap:8px;font-size:13px">
+          ${flags.length ? `<div class="callout warn" style="font-size:12px">Your profile notes mention ${esc(flags.join(' and '))},
+            and this remedy's safety section touches the same territory. Ask a pharmacist before combining.</div>` : ''}
           <div><span style="color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase">How to use</span><br>${esc(r.how)}</div>
           <div><span style="color:var(--warn);font-size:11px;letter-spacing:.08em;text-transform:uppercase">Safety & interactions</span><br>${esc(r.safety)}</div>
           <div><span style="color:var(--steel);font-size:11px;letter-spacing:.08em;text-transform:uppercase">Tradition</span><br>${esc(r.origin)}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">${r.categories.map(c =>
-            `<span class="badge" style="color:var(--ink-2);font-size:11px">${esc(CATEGORY_LABELS[c] || c)}</span>`).join('')}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${r.categories.map(c =>
+            `<span class="badge" style="color:var(--ink-2);font-size:11px">${esc(CATEGORY_LABELS[c] || c)}</span>`).join('')}
+            <button type="button" class="ghost-btn cab-btn" style="min-height:30px;padding:4px 12px;font-size:12px;margin-left:auto${saved ? ';border-color:var(--gold);color:var(--gold-bright)' : ''}">${saved ? '★ In my cabinet' : '☆ Save to cabinet'}</button>
+          </div>
         </div>
-      </details>`));
+      </details>`);
+      row.querySelector('.cab-btn').addEventListener('click', async () => {
+        try {
+          if (cabinet.has(r.id)) {
+            await api('DELETE', `/remedies/cabinet/${encodeURIComponent(r.id)}`);
+            cabinet.delete(r.id);
+            toast('Removed from your cabinet');
+          } else {
+            await api('POST', '/remedies/cabinet', { id: r.id });
+            cabinet.add(r.id);
+            toast('Saved to your cabinet');
+          }
+          renderCats();
+          renderList();
+        } catch (e) { toast(e.message); }
+      });
+      listEl.append(row);
     }
-    if (!filtered.length) listEl.append(el('<div class="empty">Nothing matches — try fewer words.</div>'));
+    if (!filtered.length) {
+      listEl.append(el(`<div class="empty">${activeCat === 'cabinet'
+        ? 'Your cabinet is empty — open any remedy and hit “Save to cabinet”.'
+        : 'Nothing matches — try fewer words.'}</div>`));
+    }
   }
 
   function renderCats() {
     catsRow.innerHTML = '';
-    const cats = ['all', ...Object.keys(CATEGORY_LABELS).filter(c => all.some(r => r.categories.includes(c)))];
+    const cats = ['all', ...(cabinet.size ? ['cabinet'] : []),
+      ...Object.keys(CATEGORY_LABELS).filter(c => all.some(r => r.categories.includes(c)))];
     for (const c of cats) {
+      const label = c === 'all' ? 'All' : c === 'cabinet' ? `★ My cabinet (${cabinet.size})` : CATEGORY_LABELS[c];
       const b = el(`<button type="button" class="ghost-btn" style="min-height:34px;padding:6px 12px;font-size:12px${
-        c === activeCat ? ';border-color:var(--gold);color:var(--gold-bright)' : ''}">${c === 'all' ? 'All' : esc(CATEGORY_LABELS[c])}</button>`);
+        c === activeCat ? ';border-color:var(--gold);color:var(--gold-bright)' : ''}">${esc(label)}</button>`);
       b.addEventListener('click', () => { activeCat = c; renderCats(); renderList(); });
       catsRow.append(b);
     }
