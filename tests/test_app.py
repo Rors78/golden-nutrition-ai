@@ -156,11 +156,18 @@ def test_deals_endpoint(client, monkeypatch):
 
 def test_coach_roster_and_selection(client):
     state = client.get("/api/state").get_json()
-    assert len(state["coaches"]) == 10
+    assert len(state["coaches"]) == 20
     assert state["coach"] == "cutler"
     ids = {c["id"] for c in state["coaches"]}
     assert {"cutler", "arnold", "hall", "jetli", "goggins",
-            "bolt", "wicks", "austin", "simmons", "adriene"} == ids
+            "bolt", "wicks", "austin", "simmons", "adriene",
+            "fraser", "phelps", "tyson", "pavel", "heria",
+            "nippard", "casseyho", "lalanne", "serena", "biles"} == ids
+    # every coach carries the full persona contract
+    for c in state["coaches"]:
+        for field in ("name", "emoji", "goal", "style", "vibe",
+                      "workout", "nutrition", "supplements", "voice", "caveats"):
+            assert c.get(field), f"{c.get('id')} missing {field}"
 
     assert client.post("/api/coach/select", json={"id": "goggins"}).status_code == 200
     assert client.get("/api/state").get_json()["coach"] == "goggins"

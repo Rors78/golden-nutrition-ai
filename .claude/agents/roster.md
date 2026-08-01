@@ -29,8 +29,11 @@ nutrition philosophy, supplement stance, and voice.
    `persona_prompt()` injects them as safety guardrails — never strip or dilute.
 4. **One goal per coach, no overlap.** The roster covers: mass, aesthetics, raw
    strength, martial arts/mobility, endurance/toughness, speed, HIIT fat loss,
-   everyday toning, fun cardio/weight loss, flexibility/recovery. A new coach
-   must claim a genuinely new goal or replace the current holder.
+   everyday toning, fun cardio/weight loss, flexibility/recovery, CrossFit/
+   functional, swimming/aerobic engine, boxing conditioning, kettlebell
+   minimalism, calisthenics skills, science-based hypertrophy, Pilates core,
+   longevity, athletic power, gymnastic strength. A new coach must claim a
+   genuinely new goal or replace the current holder.
 5. **Voice must survive JSON.** The plan generator returns structured data —
    personality lives in `coach_note`, day titles, and detail phrasing. Check a
    generated plan reads in-voice after any prompt change.
