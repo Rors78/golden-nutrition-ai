@@ -381,6 +381,71 @@ def test_meal_suggestions_use_remaining_macros_and_persona(client, monkeypatch):
     assert "recent_regulars" in ctx and "time_now" in ctx
 
 
+def test_coach_chat_grounded_and_persistent(client, monkeypatch):
+    client.post("/api/coach/select", json={"id": "pavel"})
+    client.post("/api/meals", json={"name": "Eggs", "protein": 30, "calories": 400})
+    captured = {}
+
+    def fake_chat(persona, history, message, snapshot):
+        captured.update(persona=persona, history=list(history),
+                        message=message, snapshot=json.loads(snapshot))
+        return "Practice, comrade. Five crisp singles, then walk away."
+    monkeypatch.setattr(ai, "coach_chat", fake_chat)
+
+    r = client.post("/api/coach/chat", json={"message": "should I train today?"})
+    assert r.status_code == 200 and "comrade" in r.get_json()["reply"]
+    assert "Pavel Tsatsouline" in captured["persona"]
+    assert captured["history"] == []  # first turn
+    snap = captured["snapshot"]
+    assert snap["today_macros"]["protein"] == 30
+    assert "readiness" in snap and "plan_progress" in snap
+
+    # second turn sees the first exchange
+    client.post("/api/coach/chat", json={"message": "and food?"})
+    assert len(captured["history"]) == 2
+    assert captured["history"][0]["role"] == "user"
+
+    chat = client.get("/api/state").get_json()["coach_chat"]
+    assert len(chat) == 4 and chat[1]["coach"] == "pavel"
+
+    assert client.delete("/api/coach/chat").status_code == 200
+    assert client.get("/api/state").get_json()["coach_chat"] == []
+    assert client.post("/api/coach/chat", json={"message": "  "}).status_code == 400
+
+
+def test_plan_progress(client, monkeypatch):
+    assert client.get("/api/state").get_json()["stats"]["plan_progress"] == {"has_plan": False}
+
+    # seed a plan via the mocked generator, then log a workout on Monday
+    week = [{"day": "Monday", "title": "Push", "focus": "Chest", "details": ["Bench 4x10"]},
+            {"day": "Sunday", "title": "Rest Day", "focus": "Recovery", "details": ["Walk"]}]
+    fake = {"week": week, "meals": [], "supplements": [], "coach_note": "Go."}
+    monkeypatch.setattr(ai, "weekly_plan", lambda p, persona, context="": fake)
+    client.post("/api/plan")
+
+    monday = (date.today() - timedelta(days=date.today().weekday())).isoformat()
+    client.post("/api/workouts", json={"date": monday, "name": "Push", "duration": 60,
+                                       "exercises": [{"exercise": "Bench", "sets": 4,
+                                                      "reps": 10, "weight": 135}]})
+    prog = client.get("/api/state").get_json()["stats"]["plan_progress"]
+    assert prog["has_plan"] is True
+    by_day = {x["day"].lower(): x["status"] for x in prog["days"]}
+    assert by_day["monday"] == "done"
+    assert by_day["sunday"] in ("rest",)
+    assert prog["done"] >= 1 and prog["pct"] is not None
+
+
+def test_weekly_review_archived(client, monkeypatch):
+    client.post("/api/meals", json={"name": "Rice", "protein": 10, "calories": 200})
+    monkeypatch.setattr(ai, "coaching_summary",
+                        lambda week, persona=None: "**What went well**: showing up.")
+    client.post("/api/coach")
+    reviews = client.get("/api/state").get_json()["reviews"]
+    assert len(reviews) == 1
+    assert reviews[0]["date"] == date.today().isoformat()
+    assert "showing up" in reviews[0]["summary"]
+
+
 def test_supplement_adherence(client):
     assert client.get("/api/state").get_json()["stats"]["adherence"] == {"has_schedule": False}
     client.post("/api/schedule", json={"name": "Creatine", "time": "Morning"})

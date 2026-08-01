@@ -33,6 +33,71 @@ export function renderCoach(root, state) {
   }
   root.append(grid);
 
+  // ── live chat with your coach ──
+  const chatCard = el(`<div class="card" style="margin-top:14px">
+    <div class="form-row" style="align-items:center">
+      <p class="chart-title" style="margin:0;flex:1">Talk to ${esc(selected?.name || 'your coach')} ${state.ai_backend ? `· ${esc(state.ai_backend)}` : ''}</p>
+      ${(state.coach_chat || []).length ? '<button class="ghost-btn chat-clear" type="button" style="flex:0 1 auto;min-height:34px;padding:6px 12px;font-size:12px">Clear thread</button>' : ''}
+    </div>
+    <div class="chat-log"></div>
+    <form class="form-row">
+      <label style="flex:1 1 260px"><input name="message" type="text" autocomplete="off"
+        placeholder="should I still train today? · what do I eat before the gym? · my knee felt off on squats"></label>
+      <button class="gold-btn" type="submit" style="flex:0 1 auto">Send</button>
+    </form>
+  </div>`);
+  const log = chatCard.querySelector('.chat-log');
+  const coachById = id => (state.coaches || []).find(c => c.id === id);
+
+  function bubble(m) {
+    if (m.role === 'user') {
+      return el(`<div class="chat-msg user">${esc(m.text)}<span class="chat-ts">${esc(m.ts || '')}</span></div>`);
+    }
+    const who = coachById(m.coach)?.name || 'Coach';
+    return el(`<div class="chat-msg coach"><div class="prose" style="font-size:14px">${markdown(m.text)}</div>
+      <span class="chat-ts">${esc(who)} · ${esc(m.ts || '')}</span></div>`);
+  }
+  const existing = state.coach_chat || [];
+  if (existing.length) {
+    existing.forEach(m => log.append(bubble(m)));
+  } else {
+    log.append(el(`<div class="empty" style="padding:16px">Your coach is here around the clock — training calls,
+      food questions, motivation. They can see today's numbers and your readiness.</div>`));
+  }
+  requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
+
+  const chatForm = chatCard.querySelector('form');
+  chatForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const message = chatForm.message.value.trim();
+    if (!message) return;
+    const btn = chatForm.querySelector('button');
+    btn.disabled = true;
+    chatForm.message.value = '';
+    if (log.querySelector('.empty')) log.innerHTML = '';
+    log.append(bubble({ role: 'user', text: message, ts: '' }));
+    const thinking = el(`<div class="chat-msg coach"><span class="spinner"></span>${esc(selected?.name || 'Coach')} is thinking…</div>`);
+    log.append(thinking);
+    log.scrollTop = log.scrollHeight;
+    try {
+      const { reply } = await api('POST', '/coach/chat', { message });
+      thinking.replaceWith(bubble({ role: 'coach', text: reply, coach: state.coach, ts: 'now' }));
+    } catch (err) {
+      thinking.remove();
+      toast(err.message);
+    } finally {
+      btn.disabled = false;
+      log.scrollTop = log.scrollHeight;
+      chatForm.message.focus();
+    }
+  });
+  const clearBtn = chatCard.querySelector('.chat-clear');
+  if (clearBtn) clearBtn.addEventListener('click', async () => {
+    try { await api('DELETE', '/coach/chat'); toast('Thread cleared'); await refresh(); }
+    catch (e) { toast(e.message); }
+  });
+  root.append(chatCard);
+
   // ── weekly plan ──
   const planCard = el(`<div class="card" style="margin-top:14px">
     <p class="chart-title">Your week, ${esc(selected?.style || 'planned')}</p>
@@ -60,12 +125,22 @@ export function renderCoach(root, state) {
     const plan = cached.plan;
     const coach = coaches.find(c => c.id === cached.coach);
     planOut.innerHTML = '';
-    planOut.append(el(`<p class="section-sub" style="margin:12px 0 8px">By ${esc(coach?.name || 'your coach')} · ${esc(cached.generated_at)}</p>`));
+    const prog = state.stats.plan_progress;
+    const adherence = prog?.has_plan && prog.pct != null
+      ? ` · <span style="color:${prog.pct >= 80 ? 'var(--good)' : prog.pct >= 50 ? 'var(--ink-2)' : 'var(--warn)'}">${prog.done}/${prog.due} sessions done this week (${prog.pct}%)</span>`
+      : '';
+    planOut.append(el(`<p class="section-sub" style="margin:12px 0 8px">By ${esc(coach?.name || 'your coach')} · ${esc(cached.generated_at)}${adherence}</p>`));
+
+    const statusByDay = {};
+    if (prog?.has_plan) for (const x of prog.days) statusByDay[(x.day || '').toLowerCase()] = x.status;
 
     const week = el('<div class="plan-week"></div>');
     for (const d of plan.week) {
+      const status = statusByDay[(d.day || '').toLowerCase()];
       week.append(el(`<div class="plan-day${/rest|recovery/i.test(d.title + d.focus) ? ' rest' : ''}">
-        <div class="plan-day-head"><span class="plan-dow">${esc(d.day)}</span><span class="plan-title">${esc(d.title)}</span></div>
+        <div class="plan-day-head"><span class="plan-dow">${esc(d.day)}</span>
+          ${status ? `<span class="plan-status ${status}">${status}</span>` : ''}</div>
+        <div class="plan-day-head"><span class="plan-title">${esc(d.title)}</span></div>
         <div class="plan-focus">${esc(d.focus)}</div>
         <ul>${d.details.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
       </div>`));
@@ -118,6 +193,20 @@ export function renderCoach(root, state) {
       toast(e.message);
     } finally { btn.disabled = false; }
   });
+  // past reviews archive
+  const reviews = (state.reviews || []).slice().reverse();
+  if (reviews.length) {
+    const arch = el('<div style="margin-top:10px"></div>');
+    for (const r of reviews) {
+      const by = coaches.find(c => c.id === r.coach)?.name || 'Coach';
+      arch.append(el(`<details style="border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg);margin-top:6px">
+        <summary style="padding:10px 14px;cursor:pointer;list-style:none;font-size:13px;color:var(--ink-2)">
+          Review · ${esc(r.date)} · ${esc(by)}</summary>
+        <div class="prose" style="padding:0 14px 12px;font-size:13px">${markdown(r.summary)}</div>
+      </details>`));
+    }
+    aiCard.append(arch);
+  }
   root.append(aiCard);
 
   if (!ins.has_data) {

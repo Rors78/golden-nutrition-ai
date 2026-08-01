@@ -1,4 +1,5 @@
 """Computed stats served to the frontend: totals, trends, insights, progression."""
+import re
 from datetime import date, timedelta
 
 from .data import MACRO_FIELDS
@@ -203,6 +204,47 @@ def training_summary(data):
         'volume_7d': round(volume),
         'streak_weeks': streak,
     }
+
+
+DAY_NAMES = ('monday', 'tuesday', 'wednesday', 'thursday', 'friday',
+             'saturday', 'sunday')
+
+
+def plan_progress(data):
+    """Track the coach's weekly plan against workouts actually logged this
+    calendar week: per-day status + adherence over the days elapsed so far."""
+    week = (data.get('plan') or {}).get('plan', {}).get('week', [])
+    if not week:
+        return {'has_plan': False}
+    monday = date.today() - timedelta(days=date.today().weekday())
+    workout_dates = {w['date'] for w in data['workouts']}
+    days, done, due = [], 0, 0
+    for entry in week:
+        name = str(entry.get('day', '')).lower()
+        idx = next((i for i, d in enumerate(DAY_NAMES) if d in name), None)
+        if idx is None:
+            continue
+        day_date = monday + timedelta(days=idx)
+        is_rest = bool(re.search(r'rest|recovery|off',
+                                 f"{entry.get('title', '')} {entry.get('focus', '')}", re.I))
+        if is_rest:
+            status = 'rest'
+        elif day_date.isoformat() in workout_dates:
+            status = 'done'
+        elif day_date == date.today():
+            status = 'today'
+        elif day_date < date.today():
+            status = 'missed'
+        else:
+            status = 'upcoming'
+        if not is_rest and day_date <= date.today():
+            due += 1
+            if status == 'done':
+                done += 1
+        days.append({'day': entry.get('day'), 'date': day_date.isoformat(),
+                     'status': status})
+    return {'has_plan': True, 'days': days, 'done': done, 'due': due,
+            'pct': round(done / due * 100) if due else None}
 
 
 def quick_meals(data, limit=12):

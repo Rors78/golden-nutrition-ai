@@ -84,6 +84,8 @@ def get_state():
         'remedies_stats': kb_stats(),
         'coaches': ROSTER,
         'coach': d['profile'].get('coach', DEFAULT_COACH),
+        'coach_chat': d.get('coach_chat', []),
+        'reviews': (d.get('reviews') or [])[-5:],
         'plan': d.get('plan'),
         'stats': {
             'today': stats.today_summary(d),
@@ -97,6 +99,7 @@ def get_state():
             'vitals': stats.vitals_summary(d),
             'readiness': stats.readiness(d),
             'achievements': stats.achievements(d),
+            'plan_progress': stats.plan_progress(d),
         },
         'ai_backend': ai.backend_name(),
         'recovery_note': note,
@@ -763,10 +766,58 @@ def coach():
         return _err("Log some meals or workouts first — there's nothing from the last 7 days to review.")
     coach = get_coach(d['profile'].get('coach', DEFAULT_COACH))
     try:
-        return jsonify({'summary': ai.coaching_summary(week_data, persona_prompt(coach)),
-                        'coach': coach['id']})
+        summary = ai.coaching_summary(week_data, persona_prompt(coach))
     except Exception as e:
         return _err(e, 502)
+    reviews = d.setdefault('reviews', [])
+    reviews.append({'date': date.today().isoformat(), 'coach': coach['id'],
+                    'summary': summary})
+    d['reviews'] = reviews[-12:]
+    store.save(d)
+    return jsonify({'summary': summary, 'coach': coach['id']})
+
+
+@bp.post('/coach/chat')
+def coach_chat():
+    message = str(request.get_json(force=True).get('message', '')).strip()
+    if not message:
+        return _err('Say something to your coach first.')
+    d = store.load()
+    coach = get_coach(d['profile'].get('coach', DEFAULT_COACH))
+    today = stats.today_summary(d)
+    snapshot = json.dumps({
+        'time_now': datetime.now().strftime('%A %H:%M'),
+        'today_macros': today['totals'],
+        'goals': {'protein_g': d['profile'].get('daily_protein_g'),
+                  'calories': d['profile'].get('daily_calories')},
+        'readiness': stats.readiness(d),
+        'training_7d': stats.training_summary(d),
+        'plan_today': next((x for x in (d.get('plan') or {}).get('plan', {}).get('week', [])
+                            if datetime.now().strftime('%A').lower() in str(x.get('day', '')).lower()), None),
+        'plan_progress': stats.plan_progress(d),
+        'latest_weight': (sorted(d['weights'], key=lambda w: w['date'])[-1]
+                          if d['weights'] else None),
+        'profile_notes': d['profile'].get('notes', ''),
+    })
+    history = d.get('coach_chat', [])
+    try:
+        reply = ai.coach_chat(persona_prompt(coach), history, message, snapshot)
+    except Exception as e:
+        return _err(e, 502)
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+    history.append({'role': 'user', 'text': message, 'ts': now})
+    history.append({'role': 'coach', 'text': reply, 'ts': now, 'coach': coach['id']})
+    d['coach_chat'] = history[-40:]
+    store.save(d)
+    return jsonify({'reply': reply, 'coach': coach['id']})
+
+
+@bp.delete('/coach/chat')
+def coach_chat_clear():
+    d = store.load()
+    d['coach_chat'] = []
+    store.save(d)
+    return jsonify({'ok': True})
 
 
 @bp.put('/entry/<kind>/<int:idx>')
