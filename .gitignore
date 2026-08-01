@@ -2,3 +2,5 @@ __pycache__/
 venv/
 .streamlit/
 nutrition_data.json
+nutrition_data.pre-restore.json
+backups/
