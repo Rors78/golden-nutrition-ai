@@ -7,6 +7,7 @@ import { renderWorkouts } from './sections/workouts.js';
 import { renderSupplements } from './sections/supplements.js';
 import { renderDeals } from './sections/deals.js';
 import { renderCoach } from './sections/coach.js';
+import { renderRemedies } from './sections/remedies.js';
 
 const SECTIONS = {
   dashboard: renderDashboard,
@@ -16,6 +17,7 @@ const SECTIONS = {
   workouts: renderWorkouts,
   supplements: renderSupplements,
   deals: renderDeals,
+  remedies: renderRemedies,
   coach: renderCoach,
 };
 

@@ -473,6 +473,63 @@ def test_voice_routing(client, monkeypatch):
     assert client.post("/api/voice", json={"text": "what is love"}).status_code == 400
 
 
+def test_remedies_kb_loads_and_merges(client):
+    from app.remedies_kb import CATEGORIES, kb_stats, load_kb, search_kb
+    kb = load_kb()
+    assert len(kb) >= 250, f"expected a full archive, got {len(kb)}"
+    ids = [r['id'] for r in kb]
+    names = [r['name'].lower() for r in kb]
+    assert len(names) == len(set(names)), "cross-tradition duplicates must merge"
+    for r in kb[:50] + kb[-50:]:
+        assert 1 <= r['evidence'] <= 5
+        assert r['traditions'] and r['summary'] and r['safety']
+        assert all(c in CATEGORIES for c in r['categories'])
+    # honey spans multiple traditions in the source — the merge must show it
+    honey = next((r for r in kb if r['name'].lower() == 'honey'), None)
+    assert honey and len(honey['traditions']) >= 2
+    assert kb[0]['evidence'] >= kb[-1]['evidence']  # strongest first
+    assert search_kb('sleep')  # relevance search returns something
+    stats_ = kb_stats()
+    assert stats_['count'] == len(kb) and stats_['traditions'] >= 8
+
+
+def test_remedies_gate_and_unlock(client):
+    # locked by default: no KB leaves the server
+    assert client.get("/api/remedies").status_code == 403
+    assert client.post("/api/remedies/ask", json={"question": "sleep"}).status_code == 403
+    state = client.get("/api/state").get_json()
+    assert state["remedies_unlocked"] is False
+    assert "remedies" not in state  # only stats are teased
+    assert state["remedies_stats"]["count"] >= 250
+
+    assert client.post("/api/remedies/unlock", json={"key": "wrong"}).status_code == 403
+    assert client.post("/api/remedies/unlock", json={"key": "golden"}).status_code == 200
+    assert client.get("/api/state").get_json()["remedies_unlocked"] is True
+    r = client.get("/api/remedies")
+    assert r.status_code == 200 and len(r.get_json()["remedies"]) >= 250
+
+
+def test_remedies_ask_grounded(client, monkeypatch):
+    client.post("/api/remedies/unlock", json={"key": "GOLDEN"})
+    captured = {}
+
+    def fake_answer(profile, question, matches):
+        captured["question"] = question
+        captured["matches"] = matches
+        return "Valerian is your best-graded option. Talk to a doctor first."
+    monkeypatch.setattr(ai, "remedy_answer", fake_answer)
+
+    r = client.post("/api/remedies/ask", json={"question": "help me sleep"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "sources" in body and len(body["sources"]) >= 1
+    assert captured["matches"], "answer must be grounded in KB matches"
+    assert all("safety" in m for m in captured["matches"])
+
+    r = client.post("/api/remedies/ask", json={"question": "zzzqqqxxx"})
+    assert r.status_code == 400  # no matches → honest refusal, no AI call
+
+
 def test_pwa_surfaces(client):
     assert client.get("/sw.js").status_code == 200
     assert b"manifest.webmanifest" in client.get("/").data

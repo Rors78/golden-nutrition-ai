@@ -1,0 +1,110 @@
+[
+  {
+    "id": "omega-3-fish-oil-mod",
+    "name": "Omega-3 Fish Oil",
+    "aka": "EPA/DHA, icosapent ethyl, Vascepa, algae omega-3",
+    "tradition": "Modern Integrative",
+    "categories": ["heart", "blood-pressure"],
+    "evidence": 5,
+    "summary": "REDUCE-IT (4g/day pure EPA) cut major cardiovascular events 25%, a Cochrane review of 86 RCTs found fewer coronary events, and omega-3s reliably lower triglycerides 15-30%.",
+    "how": "1-2g EPA/DHA daily for heart health, 2-4g for high triglycerides, 1g post-heart-attack. Take with a fatty meal (3x absorption); choose third-party-tested triglyceride-form products and refrigerate.",
+    "safety": "Blood thinners (warfarin, aspirin, clopidogrel): bleeding risk above 3g/day, monitor INR. Additive with BP medications. May slightly raise fasting glucose. Stop high doses 1-2 weeks before surgery. Over 4g/day may increase atrial fibrillation risk. Fish allergy: use algae-based.",
+    "origin": "Essential long-chain fats from fatty fish or algae that the body cannot make itself."
+  },
+  {
+    "id": "coq10-mod",
+    "name": "Coenzyme Q10",
+    "aka": "CoQ10, ubiquinol, ubiquinone",
+    "tradition": "Modern Integrative",
+    "categories": ["heart", "energy", "pain", "blood-pressure"],
+    "evidence": 5,
+    "summary": "Q-SYMBIO (300mg/day, 2 years) cut cardiovascular mortality 43% in severe heart failure; a meta-analysis of 12 RCTs found reduced statin muscle pain, and 300mg/day halved migraine frequency.",
+    "how": "100-200mg/day general support; 300mg/day split in 2-3 doses for heart failure or migraine. Ubiquinol is 2-3x more bioavailable; take with fat and allow 4-12 weeks.",
+    "safety": "Warfarin: vitamin-K-like structure may reduce its effect - monitor INR. Additive with BP drugs. May improve insulin sensitivity - monitor blood sugar on diabetes medication. Discuss with your oncologist before combining with doxorubicin. Mild GI upset or insomnia if taken late; avoid over 300mg/day unsupervised.",
+    "origin": "A mitochondrial antioxidant whose levels decline with age and with statin use."
+  },
+  {
+    "id": "magnesium-mod",
+    "name": "Magnesium",
+    "aka": "magnesium glycinate, citrate, taurate, oxide",
+    "tradition": "Modern Integrative",
+    "categories": ["heart", "blood-pressure", "blood-sugar", "sleep"],
+    "evidence": 5,
+    "summary": "A meta-analysis of 34 RCTs found ~368mg/day lowered BP 2.0/1.78 mmHg, most in deficiency; other meta-analyses show improved insulin sensitivity and lower heart failure and stroke risk.",
+    "how": "300-500mg elemental magnesium daily for hypertension, 200-400mg general, in divided doses. Glycinate or taurate for cardiovascular use; citrate loosens stools; oxide absorbs poorly. Evening dosing may aid sleep.",
+    "safety": "Chelates fluoroquinolone/tetracycline antibiotics and bisphosphonates - separate by 2-4 hours. Thiazide and loop diuretics deplete magnesium; potassium-sparing ones retain it. Deficiency raises digoxin toxicity risk. Long-term PPIs deplete it. Kidney disease: supervision only. Over 600mg/day causes diarrhea.",
+    "origin": "An essential mineral in 600+ enzyme reactions; most Americans fall short of adequate intake."
+  },
+  {
+    "id": "potassium-mod",
+    "name": "Potassium-Rich Foods",
+    "aka": "dietary potassium, potassium salt substitutes",
+    "tradition": "Modern Integrative",
+    "categories": ["blood-pressure", "heart"],
+    "evidence": 5,
+    "summary": "DASH cut BP 11.4/5.5 mmHg in hypertensive adults, a WHO meta-analysis linked higher potassium to 24% lower stroke risk, and the SSaSS trial found salt substitutes reduced stroke 14%.",
+    "how": "Target 3,500-4,700mg/day from food (average is ~2,500mg): potato with skin, spinach, white beans, dried apricots, avocado, salmon, yogurt. Use potassium salt substitutes; steam or roast rather than boil.",
+    "safety": "ACE inhibitors and ARBs (lisinopril, losartan) raise potassium - high intake risks dangerous hyperkalemia. Same with potassium-sparing diuretics (spironolactone, amiloride) and NSAIDs. Kidney disease needs physician management. Hyperkalemia (weakness, irregular heartbeat, tingling) is an emergency; supplements above 99mg need supervision.",
+    "origin": "An essential electrolyte for heart rhythm and vascular tone, best obtained from whole foods."
+  },
+  {
+    "id": "beetroot-nitrate-mod",
+    "name": "Beetroot Juice",
+    "aka": "dietary nitrates, beet shots, Beet-It",
+    "tradition": "Modern Integrative",
+    "categories": ["blood-pressure", "heart", "energy"],
+    "evidence": 5,
+    "summary": "A meta-analysis of 16 RCTs found beetroot juice lowered systolic BP 4.4 mmHg; 250mL daily for 4 weeks gave a sustained 7.7/2.4 mmHg drop, and 6-8 mmol nitrate improves exercise efficiency 5-7%.",
+    "how": "250-500mL juice daily or a 70mL shot; for performance take 6-8 mmol 2-3 hours pre-exercise. Effects peak at 4-6 hours; use daily 2-4 weeks for chronic BP lowering.",
+    "safety": "Antibacterial mouthwash kills the oral bacteria that convert nitrate, abolishing the BP benefit. Additive with BP drugs. PDE-5 inhibitors (sildenafil, tadalafil) share the nitric oxide pathway - risk of excessive BP drop. High vitamin K may affect warfarin. High oxalate - limit with calcium oxalate stones. Red urine is harmless.",
+    "origin": "Beets are rich in inorganic nitrate, converted in the body to vasodilating nitric oxide."
+  },
+  {
+    "id": "hawthorn-mod",
+    "name": "Hawthorn",
+    "aka": "Crataegus species, WS 1442",
+    "tradition": "Modern Integrative",
+    "categories": ["heart", "blood-pressure"],
+    "evidence": 5,
+    "summary": "A Cochrane Review of 14 RCTs found hawthorn improved exercise tolerance and heart failure symptoms; the 2,681-patient SPICE trial missed its endpoint but showed 39.7% fewer cardiac deaths at LVEF 25-35%.",
+    "how": "Standardized WS 1442 extract 160-900mg/day in 2-3 doses; or berry tincture 1-2mL three times daily. Allow 6-8 weeks; use as an adjunct, not a replacement.",
+    "safety": "May potentiate digoxin - only with medical supervision and monitoring. Additive with beta-blockers, ACE inhibitors, ARBs and calcium channel blockers; enhances nitrate vasodilation; mildly sedating with CNS depressants. NOT for NYHA class IV heart failure or as a substitute for evidence-based therapy. Occasional GI upset, dizziness, headache.",
+    "origin": "A European shrub whose berries, leaves and flowers have been cardiac medicine for centuries."
+  },
+  {
+    "id": "garlic-mod",
+    "name": "Garlic",
+    "aka": "Allium sativum, aged garlic extract, Kyolic",
+    "tradition": "Modern Integrative",
+    "categories": ["blood-pressure", "heart", "immune"],
+    "evidence": 5,
+    "summary": "Meta-analyses show aged garlic extract lowers systolic BP ~8.3 mmHg in hypertensive patients, comparable to first-line drugs; 39 RCTs show total cholesterol drops ~17 mg/dL, and 2,400mg/day slowed coronary calcium progression 80% in a year.",
+    "how": "Aged garlic extract 600-2,400mg/day, garlic powder 600-900mg/day, or 1-2 fresh cloves crushed and rested 10 minutes. Take with food; allow 8-12 weeks.",
+    "safety": "Antiplatelet effect raises bleeding risk with warfarin, aspirin and clopidogrel - monitor INR. Significantly reduces saquinavir (HIV) levels - avoid. May induce CYP3A4, altering drug metabolism. Stop 7-10 days before surgery. May enhance diabetes medications. Causes odor, heartburn and GI upset.",
+    "origin": "A culinary staple whose crushed-clove allicin and aged metabolites drive cardiovascular effects."
+  },
+  {
+    "id": "hibiscus-mod",
+    "name": "Hibiscus",
+    "aka": "Hibiscus sabdariffa, agua de jamaica, sour tea, karkade",
+    "tradition": "Modern Integrative",
+    "categories": ["blood-pressure", "heart"],
+    "evidence": 4,
+    "summary": "Three cups of hibiscus tea daily for 6 weeks lowered systolic BP 7.2 mmHg versus 1.3 for placebo in an RCT, and a meta-analysis of 5 RCTs confirmed reductions of 7.58/3.53 mmHg.",
+    "how": "Steep 1.5-3g dried calyces in 150-250mL hot water 5-10 minutes, 2-3 times daily hot or iced; or standardized extract 250-500mg/day. Effects appear within 2-6 weeks.",
+    "safety": "Additive with blood pressure medications and hydrochlorothiazide (mild diuretic effect). Reduces chloroquine bioavailability ~27% - avoid that combination. May alter acetaminophen metabolism (animal data). May lower blood sugar - monitor on diabetes drugs. Limited pregnancy data. Mild stomach upset possible.",
+    "origin": "Tart red calyces drunk worldwide as a traditional cooling cardiovascular beverage."
+  },
+  {
+    "id": "dark-chocolate-mod",
+    "name": "Dark Chocolate / Cacao",
+    "aka": "cocoa flavanols, epicatechin, CocoaVia",
+    "tradition": "Modern Integrative",
+    "categories": ["blood-pressure", "heart", "blood-sugar"],
+    "evidence": 5,
+    "summary": "A Cochrane Review of 20 RCTs found flavanol-rich cacao lowered BP 2.8/2.2 mmHg, 42 RCTs showed reduced LDL and insulin resistance, and the 21,442-participant COSMOS trial found 27% fewer cardiovascular deaths on 500mg flavanols daily.",
+    "how": "200-900mg cocoa flavanols daily, 20-40g of 70%+ dark chocolate, or 2-3 tbsp natural non-Dutch-processed cocoa. Dutch processing destroys flavanols; watch sugar and calories.",
+    "safety": "Contains caffeine and theobromine - may cause insomnia, worsen anxiety, or interact with stimulants. Tyramine poses a theoretical hypertensive-crisis risk with MAOI antidepressants. Common migraine trigger. Mild additive effect with BP drugs. High oxalate - caution with calcium oxalate stones. Worsens GERD.",
+    "origin": "Cacao flavanols, especially epicatechin, stimulate nitric oxide in the vascular endothelium."
+  }
+]

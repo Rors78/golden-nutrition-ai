@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request, Response
 from . import ai, data as store, notify, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
 from .data import clean_num
+from .remedies_kb import kb_stats, load_kb, search_kb
 from .supplement_kb import KB
 
 bp = Blueprint('api', __name__, url_prefix='/api')
@@ -77,6 +78,8 @@ def get_state():
         'deals': d.get('deals'),
         'supp_advice': d.get('supp_advice'),
         'kb': KB,
+        'remedies_unlocked': bool(d['settings'].get('remedies_unlocked')),
+        'remedies_stats': kb_stats(),
         'coaches': ROSTER,
         'coach': d['profile'].get('coach', DEFAULT_COACH),
         'plan': d.get('plan'),
@@ -534,6 +537,51 @@ def supplements_advice():
                         'coach': coach['id'], 'advice': advice}
     store.save(d)
     return jsonify(d['supp_advice'])
+
+
+REMEDY_UNLOCK_KEY = 'GOLDEN'  # placeholder gate — swap for real payments when hosted
+
+
+def _remedies_locked(d):
+    return not d['settings'].get('remedies_unlocked')
+
+
+@bp.post('/remedies/unlock')
+def remedies_unlock():
+    body = request.get_json(force=True)
+    if str(body.get('key', '')).strip().upper() != REMEDY_UNLOCK_KEY:
+        return _err('That key did not unlock the Apothecary.', 403)
+    d = store.load()
+    d['settings']['remedies_unlocked'] = True
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.get('/remedies')
+def remedies():
+    d = store.load()
+    if _remedies_locked(d):
+        return _err('The Apothecary is locked.', 403)
+    return jsonify({'remedies': load_kb(), **kb_stats()})
+
+
+@bp.post('/remedies/ask')
+def remedies_ask():
+    d = store.load()
+    if _remedies_locked(d):
+        return _err('The Apothecary is locked.', 403)
+    question = str(request.get_json(force=True).get('question', '')).strip()
+    if not question:
+        return _err('Ask a question first.')
+    matches = search_kb(question)
+    if not matches:
+        return _err("Nothing in the archive matches that — try different words "
+                    "(e.g. 'sleep', 'joint pain', 'blood pressure').")
+    try:
+        answer = ai.remedy_answer(d['profile'], question, matches)
+    except Exception as e:
+        return _err(e, 502)
+    return jsonify({'answer': answer, 'sources': [m['name'] for m in matches]})
 
 
 @bp.post('/checklist/toggle')

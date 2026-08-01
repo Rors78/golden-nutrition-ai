@@ -510,6 +510,50 @@ def parse_meal_photo(image_path):
     return cleaned
 
 
+APOTHECARY_PROMPT = (
+    "You are the Apothecary — a careful, warm librarian of traditional remedies "
+    "backed by modern evidence. You answer ONLY from the remedy entries provided; "
+    "if the entries don't cover the question, say so plainly rather than "
+    "improvising. Hard rules: natural remedies are COMPLEMENTARY to medical care, "
+    "never a replacement — for serious conditions (cancer, heart disease, "
+    "diabetes, infections, mental-health crises) say clearly that medical care "
+    "comes first and these are supportive at best. Never claim cures. Surface "
+    "every relevant drug interaction and safety warning from the entries, "
+    "especially any that touch the user's stated health notes or medications. "
+    "Mention the evidence grade honestly (5 = strongest). End every answer with "
+    "one line advising a conversation with a doctor or pharmacist before starting "
+    "anything new."
+)
+
+
+def remedy_answer(profile, question, matches):
+    """Answer a remedies question grounded strictly in the matched KB entries."""
+    ask = (
+        f"My profile (age/sex/health notes matter for interactions): {json.dumps(profile)}\n\n"
+        f"My question: {question}\n\n"
+        f"The only remedy entries you may draw on:\n{json.dumps(matches, indent=1)}\n\n"
+        "Answer in under 250 words of plain text (no markdown headers). Recommend at "
+        "most 3 options, best evidence first, each with how to use it and its key "
+        "caution. Flag anything that conflicts with my profile notes."
+    )
+    if cli_available():
+        return _run_cli(f"{APOTHECARY_PROMPT}\n\n{ask}", timeout=240)
+    if backend_name():
+        response = _sdk_create(
+            model=CLAUDE_MODEL,
+            max_tokens=8000,
+            system=APOTHECARY_PROMPT,
+            messages=[{"role": "user", "content": ask}],
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("Claude declined to process this request.")
+        return next(b.text for b in response.content if b.type == "text")
+    raise AIUnavailable(
+        "No Claude backend found. Install Claude Code and log in (uses your "
+        "Claude subscription), or set ANTHROPIC_API_KEY."
+    )
+
+
 VOICE_PROMPT = (
     "You route voice commands for a fitness tracking app. Given a transcript, "
     "decide the single action and extract its fields. Actions:\n"
