@@ -174,8 +174,12 @@ def find_deals(items, location=""):
         + "\nSearch the web, then respond with ONLY a JSON object — no markdown "
         "fences, no commentary — in exactly this shape:\n"
         '{"deals": [{"item": "...", "store": "...", "price": "...", '
-        '"deal": "one-line description of the offer", "url": "..."}]}\n'
-        "Give up to 8 deals, best value first. If you can't verify a price, skip it."
+        '"deal": "one-line description of the offer", "url": "...", '
+        '"unit_price": "normalized cost when computable, e.g. $0.62/serving or '
+        '£1.90/100g protein — empty string otherwise"}]}\n'
+        "Give up to 8 deals, best value first. Unit price is how supplement "
+        "shoppers compare across tub sizes — compute it whenever the listing "
+        "shows servings or weight. If you can't verify a price, skip it."
     )
     if cli_available():
         env = dict(os.environ)
@@ -219,6 +223,7 @@ def find_deals(items, location=""):
             'price': str(d.get('price', '')).strip(),
             'deal': str(d.get('deal', '')).strip(),
             'url': str(d.get('url', '')).strip(),
+            'unit_price': str(d.get('unit_price', '')).strip(),
         })
     if not cleaned:
         raise RuntimeError("No verifiable deals came back — try naming the items more specifically.")

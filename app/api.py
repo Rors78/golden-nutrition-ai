@@ -110,6 +110,7 @@ def get_state():
             'achievements': stats.achievements(d),
             'plan_progress': stats.plan_progress(d),
             'dashboard': stats.dashboard_extras(d),
+            'watch_insights': stats.watch_insights(d),
         },
         'ai_backend': ai.backend_name(),
         'recovery_note': note,

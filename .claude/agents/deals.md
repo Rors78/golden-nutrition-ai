@@ -25,8 +25,16 @@ persists in `settings.deals_location`.
 - The CLI backend must pass `--allowedTools WebSearch,WebFetch` — without it the
   headless run can't search and returns stale guesses. The SDK fallback uses the
   `web_search_20260209` server tool.
-- Deals are normalized to `{item, store, price, deal, url}` strings; itemless
-  rows are dropped; an empty result raises with actionable advice.
+- Deals are normalized to `{item, store, price, deal, url, unit_price}` strings;
+  itemless rows are dropped; an empty result raises with actionable advice.
+  `unit_price` is the per-serving/per-100g comparison figure — the prompt asks
+  for it whenever the listing shows servings or weight; empty string otherwise.
+- `stats.watch_insights()` grades each watch from its own history: latest ≤ best
+  → `best` (buy window), ≤ median → `typical`, else `high`. Verdicts need ≥2
+  points to render; they are relative to the watch's own history, never advice
+  about the "right" price.
+- The Restock radar on the Deals tab is fed by `stats.checklist()` low flags
+  (≤7 servings) — same threshold as the Supps tab; don't fork it.
 - Results are honest: the prompt tells Claude to skip unverifiable prices, and
   the UI always shows the fetched-at timestamp plus a "confirm before buying"
   disclaimer. Never present cached results as fresh — the timestamp does that job.

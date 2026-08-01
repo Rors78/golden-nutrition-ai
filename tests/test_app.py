@@ -168,6 +168,34 @@ def test_declining_weights_produce_no_prs(client):
     assert client.get("/api/state").get_json()["stats"]["recent_prs"] == []
 
 
+def test_watch_insights(client):
+    seed({"watches": [
+        {"item": "Whey 5lb", "created": "2026-07-01", "history": [
+            {"date": "2026-07-01", "price": 60}, {"date": "2026-07-10", "price": 55},
+            {"date": "2026-07-20", "price": 50}]},
+        {"item": "Creatine", "created": "2026-07-01", "history": [
+            {"date": "2026-07-01", "price": 20}, {"date": "2026-07-10", "price": 18},
+            {"date": "2026-07-20", "price": 25}]},
+        {"item": "Fish Oil", "created": "2026-07-01", "history": []},
+    ]})
+    ins = {i["item"]: i for i in
+           client.get("/api/state").get_json()["stats"]["watch_insights"]}
+    assert ins["Whey 5lb"]["verdict"] == "best" and ins["Whey 5lb"]["vs_best_pct"] == 0
+    assert ins["Creatine"]["verdict"] == "high" and ins["Creatine"]["vs_best_pct"] == 39
+    assert "18" in ins["Creatine"]["text"]
+    assert ins["Fish Oil"]["verdict"] is None
+
+
+def test_deals_unit_price_passthrough(client, monkeypatch):
+    fake = [{"item": "Whey 5lb", "store": "BulkCo", "price": "$49.99", "deal": "",
+             "url": "", "unit_price": "$0.60/serving"}]
+    monkeypatch.setattr(ai, "find_deals", lambda items, location="": fake)
+    r = client.post("/api/deals", json={"items": "whey"})
+    assert r.status_code == 200
+    assert r.get_json()["results"][0]["unit_price"] == "$0.60/serving"
+    assert client.get("/api/state").get_json()["deals"]["results"][0]["unit_price"] == "$0.60/serving"
+
+
 def test_nutrition_trend(client):
     today = date.today().isoformat()
     yday = (date.today() - timedelta(days=1)).isoformat()
