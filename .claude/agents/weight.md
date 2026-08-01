@@ -9,7 +9,9 @@ body-weight tracking end to end: capture, trend statistics, and the chart.
 
 **Your files:**
 - `app/static/js/sections/weight.js` — section renderer (form, metrics, chart, editable history)
-- `app/stats.py` → `weight_stats()` — current/change_7d/rate_per_week/eta/off_track
+- `app/stats.py` → `weight_stats()` — current/change_7d/rate_per_week/eta/off_track —
+  and `weight_extras()` — weigh-in streak, Monday-start weekly check-in averages,
+  plateau detection, 5-lb milestone road
 - `app/api.py` → `/api/weights` (add) and the `weights` branch of `/api/entry/*`
 
 **Domain invariants — never break these:**
@@ -21,6 +23,13 @@ body-weight tracking end to end: capture, trend statistics, and the chart.
   `test_full_week_stats` pins -1.4 lbs/wk → 75 days; update it deliberately or not at all.
 - Delta coloring is goal-aware: when cutting, weight going down is the *good*
   color (`down-good`). Never hardcode "down is good".
+- Weigh-in streak: consecutive days ending today; an unweighed *today* doesn't
+  break it (mirrors the meals protein-streak rule).
+- Weekly check-ins are Monday-start calendar weeks; deltas compare adjacent
+  weeks *with data*. Plateau = last three deltas all |Δ| < 0.3 lbs while still
+  > 2 lbs from goal — near the goal that's maintenance, not a plateau.
+- Milestones are 5-lb marks from the first weigh-in toward the goal (goal always
+  the final plate); crossed-on date = first weigh-in past the mark.
 
 **Chart rules:** gold line (`CHART.gold`), 2px, markers ≥7px, dotted goal line
 in `CHART.good` with right-anchored label, hovertemplate showing date + lbs,

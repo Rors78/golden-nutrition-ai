@@ -110,6 +110,86 @@ def weight_stats(data):
     }
 
 
+def weight_extras(data):
+    """Milestones, weekly check-in averages, plateau detection, weigh-in streak."""
+    weights = sorted(data.get('weights', []), key=lambda w: w['date'])
+    if not weights:
+        return {'has_data': False}
+    prof = data['profile']
+    goal = prof.get('goal_weight', 0)
+    current = weights[-1]['weight']
+    start = weights[0]['weight']
+
+    # weigh-in streak: consecutive days ending today (an unweighed today doesn't break it)
+    dates = {w['date'] for w in weights}
+    day = date.today()
+    if day.isoformat() not in dates:
+        day -= timedelta(days=1)
+    streak = 0
+    while day.isoformat() in dates:
+        streak += 1
+        day -= timedelta(days=1)
+
+    # weekly check-ins: Monday-start calendar-week averages, last 8 weeks
+    by_week = {}
+    for w in weights:
+        d = date.fromisoformat(w['date'])
+        wk = (d - timedelta(days=d.weekday())).isoformat()
+        by_week.setdefault(wk, []).append(w['weight'])
+    this_monday = date.today() - timedelta(days=date.today().weekday())
+    weeks = []
+    for i in range(7, -1, -1):
+        wk = (this_monday - timedelta(weeks=i)).isoformat()
+        if wk in by_week:
+            weeks.append({'week_start': wk,
+                          'avg': round(sum(by_week[wk]) / len(by_week[wk]), 1),
+                          'n': len(by_week[wk])})
+    for i, row in enumerate(weeks):
+        row['delta'] = None if i == 0 else round(row['avg'] - weeks[i - 1]['avg'], 1)
+
+    # plateau: three consecutive flat check-ins with real distance left to the goal
+    plateau = None
+    deltas = [w['delta'] for w in weeks[-3:] if w['delta'] is not None]
+    if goal and len(deltas) == 3 and all(abs(x) < 0.3 for x in deltas) and abs(current - goal) > 2:
+        plateau = (f"Three flat weeks in a row with {abs(round(current - goal, 1))} lbs "
+                   "still to go — a classic plateau. Nudge intake by ~200 calories in the "
+                   "right direction, add a weekly walk, and hold the line on protein.")
+
+    # 5-lb milestones from the starting weight toward the goal
+    milestones, next_milestone = [], None
+    if goal and abs(start - goal) >= 1:
+        cutting = goal < start
+        marks = []
+        if cutting:
+            m = int(start / 5) * 5
+            if m >= start:
+                m -= 5
+            while m > goal and len(marks) < 40:
+                marks.append(m)
+                m -= 5
+        else:
+            m = (int(start / 5) + 1) * 5
+            if m <= start:
+                m += 5
+            while m < goal and len(marks) < 40:
+                marks.append(m)
+                m += 5
+        marks.append(goal)
+        for mark in marks:
+            crossed_on = next((w['date'] for w in weights
+                               if (w['weight'] <= mark if cutting else w['weight'] >= mark)), None)
+            milestones.append({'target': mark, 'crossed': crossed_on is not None,
+                               'date': crossed_on})
+        nxt = next((m for m in milestones if not m['crossed']), None)
+        if nxt:
+            next_milestone = {'target': nxt['target'],
+                              'to_go': round(abs(current - nxt['target']), 1)}
+
+    return {'has_data': True, 'streak': streak, 'weeks': weeks, 'plateau': plateau,
+            'milestones': milestones, 'next_milestone': next_milestone,
+            'start': start, 'cutting': bool(goal and goal < start)}
+
+
 def insights(data):
     week_ago = _week_ago()
     meals = [m for m in data['meals'] if m['date'] >= week_ago]
