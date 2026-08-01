@@ -913,7 +913,35 @@ def dashboard_extras(data):
             actions.append({'id': 'supps', 'tab': 'supplements',
                             'text': f"{left} supplement{'s' if left > 1 else ''} still unticked today."})
 
-    return {'week_grid': grid, 'streaks': streaks, 'actions': actions[:2]}
+    # ── radar: cross-tab signals worth a glance (not actions, awareness) ──
+    radar = []
+    low = [item['name'] for item in schedule
+           if item.get('servings_left') is not None and item['servings_left'] <= 7]
+    if low:
+        radar.append({'tab': 'deals', 'level': 'warn',
+                      'text': f"Running low: {', '.join(sorted(set(low))[:3])}"
+                              f"{' +' + str(len(set(low)) - 3) if len(set(low)) > 3 else ''}"
+                              " — restock radar is live in Deals."})
+    for ins in watch_insights(data):
+        if ins.get('verdict') == 'best' and ins.get('points', 0) >= 2:
+            radar.append({'tab': 'deals', 'level': 'good',
+                          'text': f"{ins['item']} is at the lowest price seen — buy window open."})
+            break
+    wx = weight_extras(data)
+    if wx.get('has_data'):
+        nm = wx.get('next_milestone')
+        if nm and nm['to_go'] <= 2:
+            radar.append({'tab': 'weight', 'level': 'good',
+                          'text': f"Only {nm['to_go']} lbs from your {nm['target']} plate."})
+        if wx.get('plateau'):
+            radar.append({'tab': 'weight', 'level': 'warn',
+                          'text': 'Weight has been flat three weeks running — plateau playbook is in Weight.'})
+    mb = muscle_balance(data)
+    if mb.get('warning'):
+        radar.append({'tab': 'workouts', 'level': 'warn', 'text': mb['warning']})
+
+    return {'week_grid': grid, 'streaks': streaks, 'actions': actions[:2],
+            'radar': radar[:4]}
 
 
 def checklist(data):

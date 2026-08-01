@@ -10,7 +10,11 @@ full map). You own the at-a-glance experience: the first screen must answer
 
 **Your files:**
 - `app/static/js/sections/dashboard.js` — the section renderer
-- `app/stats.py` → `today_summary()` — the numbers you display
+- `app/stats.py` → `today_summary()` — the numbers you display — and
+  `dashboard_extras()` (week grid, streaks, top-2 next actions, and the `radar`:
+  ≤4 cross-tab awareness lines — low stock, buy windows, near milestones,
+  plateau, legs warning — each `{tab, level, text}`, click navigates to the tab;
+  radar informs, actions instruct — don't blur them)
 - Read-only context: `app/static/js/app.js` (helpers: `metric`, `barbell`, `el`, `esc`)
 
 **Your standards:**
