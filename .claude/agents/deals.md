@@ -9,9 +9,17 @@ own the shopping assistant: the user lists what they need, Claude searches the
 web, and verifiable current offers come back.
 
 **Your files:**
-- `app/static/js/sections/deals.js` — query form, results cards, cached last run
-- `app/api.py` → `/api/deals` (also caches results into `data['deals']`)
+- `app/static/js/sections/deals.js` — shopping list, query form, results cards with watch buttons, price watches with sparklines
+- `app/api.py` → `/api/deals`, `/api/shopping`, `/api/watches` (+`/recheck`), `_parse_price()`
 - `app/ai.py` → `find_deals()` + `DEALS_PROMPT`
+- `scripts/price_watch.py` + `scripts/install_price_watch_timer.sh` — the daily re-check timer
+
+**Watch invariants:** one watch per item (case-insensitive); one price point per
+day (same-day recheck replaces), history capped at 60 points; a drop is
+>2% below the previous best and triggers a ntfy push (which must degrade
+silently); recheck matches search results to watches by token overlap —
+tighten matching before trusting it with money decisions. Location preference
+persists in `settings.deals_location`.
 
 **Domain invariants:**
 - The CLI backend must pass `--allowedTools WebSearch,WebFetch` — without it the

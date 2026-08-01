@@ -165,6 +165,63 @@ def test_deals_endpoint(client, monkeypatch):
     assert client.get("/api/state").get_json()["deals"]["results"] == fake
 
 
+def test_shopping_list(client):
+    assert client.post("/api/shopping", json={"item": "Whey 5lb"}).status_code == 200
+    # batch + dedupe (case-insensitive)
+    r = client.post("/api/shopping", json={"items": ["whey 5lb", "Creatine"]})
+    assert r.get_json()["added"] == 1
+    assert client.get("/api/state").get_json()["shopping_list"] == ["Whey 5lb", "Creatine"]
+    assert client.delete("/api/shopping/0").status_code == 200
+    assert client.get("/api/state").get_json()["shopping_list"] == ["Creatine"]
+    assert client.post("/api/shopping", json={"item": "  "}).status_code == 400
+
+
+def test_price_watch_lifecycle(client, monkeypatch):
+    # create from a found deal
+    deal = {"item": "Whey Protein 5lb", "store": "ShopA", "price": "$54.99",
+            "deal": "intro", "url": "https://a.example"}
+    assert client.post("/api/watches", json=deal).status_code == 200
+    assert client.post("/api/watches", json=deal).status_code == 400  # no duplicates
+    w = client.get("/api/state").get_json()["watches"][0]
+    assert w["history"][0]["price"] == 54.99
+
+    # recheck: cheaper price found elsewhere → point recorded + push fired
+    from app import notify
+    pushed = {}
+    monkeypatch.setattr(notify, "push",
+                        lambda st, title, msg, priority='default':
+                        pushed.update(title=title, msg=msg) or True)
+    monkeypatch.setattr(ai, "find_deals", lambda items, location="": [
+        {"item": "Whey Protein 5 lb tub", "store": "ShopB", "price": "$49.99",
+         "deal": "sale", "url": "https://b.example"}])
+    r = client.post("/api/watches/recheck")
+    body = r.get_json()
+    assert body["updated"] == 1 and len(body["drops"]) == 1
+    assert body["drops"][0]["store"] == "ShopB"
+    assert "Price drop" in pushed["title"]
+
+    # one point per day: the same-day creation point is replaced, and the
+    # drop was still detected against the pre-replacement baseline
+    w = client.get("/api/state").get_json()["watches"][0]
+    assert len(w["history"]) == 1 and w["history"][-1]["price"] == 49.99
+
+    # a second same-day recheck neither stacks points nor re-alerts
+    r = client.post("/api/watches/recheck")
+    assert r.get_json()["drops"] == []
+    w = client.get("/api/state").get_json()["watches"][0]
+    assert len(w["history"]) == 1
+
+    assert client.delete("/api/watches/0").status_code == 200
+    assert client.post("/api/watches/recheck").status_code == 400  # none left
+
+
+def test_deals_location_persists(client, monkeypatch):
+    monkeypatch.setattr(ai, "find_deals", lambda items, location="": [
+        {"item": "x", "store": "s", "price": "$1", "deal": "", "url": ""}])
+    client.post("/api/deals", json={"items": "whey", "location": "UK · MyProtein"})
+    assert client.get("/api/state").get_json()["settings"]["deals_location"] == "UK · MyProtein"
+
+
 def test_coach_roster_and_selection(client):
     state = client.get("/api/state").get_json()
     assert len(state["coaches"]) == 20
