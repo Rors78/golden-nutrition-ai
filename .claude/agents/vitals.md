@@ -12,7 +12,10 @@ Android Health Connect → an exporter app POSTing to our webhook.
 **Your files:**
 - `app/static/js/sections/vitals.js` — manual entry, latest metrics, charts, device/notify setup
 - `app/api.py` → `/api/vitals`, `/api/ingest` (token-gated webhook, alias-tolerant), `/api/settings`, `/api/notify/test`, `/api/briefing`
-- `app/stats.py` → `vitals_summary()` (latest per field, 7d averages, BP grading)
+- `app/stats.py` → `vitals_summary()` (latest per field, 7d averages, BP grading),
+  `readiness()` + `readiness_series()` (28d trend, each day scored against the 28
+  days *before it*), `vitals_weeks()` (Monday-week recovery report), `step_stats()`
+  (goal streak — an unlogged today doesn't break it)
 - `app/notify.py` — ntfy pushes (topic name is the secret; no accounts)
 - `app/ai.py` → `daily_briefing()`
 - `app/static/sw.js`, `manifest.webmanifest`, `icon.svg` — the PWA layer (sw served from `/sw.js` for root scope)

@@ -628,6 +628,90 @@ def readiness(data):
             'guidance': guidance, 'date': latest['date'], 'components': comps}
 
 
+def readiness_series(data, days=28):
+    """Readiness score per logged day over the window, each scored against the
+    28 days of history *before that day* (same components as readiness())."""
+    vitals = sorted(data.get('vitals', []), key=lambda v: v['date'])
+    if not vitals:
+        return []
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    clamp = lambda x: max(0, min(100, round(x)))
+    out = []
+    for i, entry in enumerate(vitals):
+        if entry['date'] < cutoff:
+            continue
+        base_start = (date.fromisoformat(entry['date']) - timedelta(days=28)).isoformat()
+        prior = [v for v in vitals[:i] if v['date'] >= base_start]
+
+        def baseline(field):
+            vals = [v[field] for v in prior if v.get(field) is not None]
+            return sum(vals) / len(vals) if vals else None
+
+        scores, weights = [], []
+        if entry.get('sleep_h') is not None:
+            target = max(7.5, baseline('sleep_h') or 0)
+            scores.append(clamp(100 * entry['sleep_h'] / target)); weights.append(0.4)
+        if entry.get('hrv_ms') is not None and baseline('hrv_ms'):
+            scores.append(clamp(100 * entry['hrv_ms'] / baseline('hrv_ms'))); weights.append(0.35)
+        if entry.get('resting_hr') is not None and baseline('resting_hr'):
+            scores.append(clamp(100 * baseline('resting_hr') / entry['resting_hr'])); weights.append(0.25)
+        if scores:
+            out.append({'date': entry['date'],
+                        'score': round(sum(s * w for s, w in zip(scores, weights)) / sum(weights))})
+    return out
+
+
+def vitals_weeks(data):
+    """Weekly recovery report: Monday-start averages of the four daily vitals
+    over the last 8 weeks, with week-over-week deltas."""
+    fields = ('steps', 'resting_hr', 'hrv_ms', 'sleep_h')
+    vitals = data.get('vitals', [])
+    if not vitals:
+        return []
+    by_week = {}
+    for v in vitals:
+        d = date.fromisoformat(v['date'])
+        wk = (d - timedelta(days=d.weekday())).isoformat()
+        by_week.setdefault(wk, []).append(v)
+    this_monday = date.today() - timedelta(days=date.today().weekday())
+    weeks = []
+    for i in range(7, -1, -1):
+        wk = (this_monday - timedelta(weeks=i)).isoformat()
+        if wk not in by_week:
+            continue
+        row = {'week_start': wk, 'n': len(by_week[wk])}
+        for f in fields:
+            vals = [v[f] for v in by_week[wk] if v.get(f) is not None]
+            row[f] = round(sum(vals) / len(vals), 1) if vals else None
+        weeks.append(row)
+    for i, row in enumerate(weeks):
+        for f in fields:
+            prev = weeks[i - 1][f] if i else None
+            row[f'{f}_delta'] = (round(row[f] - prev, 1)
+                                 if row.get(f) is not None and prev is not None else None)
+    return weeks
+
+
+def step_stats(data):
+    """Step-goal streak (unlogged today doesn't break it) + 14-day hit count."""
+    goal = data.get('settings', {}).get('daily_steps', 8000) or 0
+    if not goal:
+        return {'has_goal': False}
+    hit_dates = {v['date'] for v in data.get('vitals', [])
+                 if v.get('steps') is not None and v['steps'] >= goal}
+    logged = {v['date'] for v in data.get('vitals', []) if v.get('steps') is not None}
+    day = date.today()
+    if day.isoformat() not in logged:
+        day -= timedelta(days=1)
+    streak = 0
+    while day.isoformat() in hit_dates:
+        streak += 1
+        day -= timedelta(days=1)
+    last14 = {(date.today() - timedelta(days=i)).isoformat() for i in range(14)}
+    return {'has_goal': True, 'goal': goal, 'streak': streak,
+            'hits_14': len(hit_dates & last14)}
+
+
 def consecutive_days(dates_set):
     """Days-in-a-row ending today that appear in the given date set."""
     streak, day = 0, date.today()
