@@ -412,6 +412,40 @@ def supplement_advice(profile, persona, context):
     return advice
 
 
+def coach_chat(persona, history, message, snapshot):
+    """One turn of live coach chat: persona voice, grounded in the athlete's
+    current data snapshot, aware of the recent conversation."""
+    convo = "\n".join(f"{'Athlete' if m['role'] == 'user' else 'Coach'}: {m['text']}"
+                      for m in history[-12:])
+    ask = (
+        "You are in an ongoing chat with your athlete.\n\n"
+        f"Their live data right now: {snapshot}\n\n"
+        + (f"Recent conversation:\n{convo}\n\n" if convo else "")
+        + f"Athlete: {message}\n\n"
+        "Reply in your coaching voice. Keep it under 150 words unless they ask for "
+        "detail. Be practical and specific — use their actual numbers when relevant. "
+        "You may adjust today's training based on their readiness and data. For "
+        "anything medical (pain that persists, chest symptoms, injuries, medication "
+        "questions), tell them to see a professional rather than coaching through it."
+    )
+    if cli_available():
+        return _run_cli(f"{persona}\n\n{ask}", timeout=240)
+    if backend_name():
+        response = _sdk_create(
+            model=CLAUDE_MODEL,
+            max_tokens=8000,
+            system=persona,
+            messages=[{"role": "user", "content": ask}],
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("Claude declined to process this request.")
+        return next(b.text for b in response.content if b.type == "text")
+    raise AIUnavailable(
+        "No Claude backend found. Install Claude Code and log in (uses your "
+        "Claude subscription), or set ANTHROPIC_API_KEY."
+    )
+
+
 def daily_briefing(profile, persona, context):
     """A short morning briefing in the coach's voice: plan, focus, one nudge."""
     ask = (

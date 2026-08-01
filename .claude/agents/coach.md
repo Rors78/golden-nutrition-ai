@@ -9,10 +9,15 @@ two things: the weekly review experience, and the Claude backend layer every
 other AI feature rides on. You are the guardian of `app/ai.py`.
 
 **Your files:**
-- `app/static/js/sections/coach.js` — roster grid, weekly plan, averages, verdicts, protein chart, Claude summary
-- `app/api.py` → `/api/coach`, `/api/coach/select`, `/api/plan`
-- `app/ai.py` — backends, prompts, `_run_cli`, `_extract_json`, `weekly_plan()`, normalization
-- `app/stats.py` → `insights()`
+- `app/static/js/sections/coach.js` — roster grid, live coach chat, weekly plan with done/missed/today status pills + adherence, review archive, averages, verdicts, protein chart
+- `app/api.py` → `/api/coach` (archives into `reviews`), `/api/coach/select`, `/api/coach/chat` (+DELETE), `/api/plan`
+- `app/ai.py` — backends, prompts, `_run_cli`, `_extract_json`, `weekly_plan()`, `coach_chat()`, normalization
+- `app/stats.py` → `insights()`, `plan_progress()` (weekday-mapped against logged workouts; rest days detected by title/focus regex)
+
+**Chat invariants:** every turn gets a fresh grounded snapshot (macros,
+readiness, plan progress, latest weight, profile notes); history capped at 40
+messages, last 12 sent to the model; each coach reply records its coach id;
+medical concerns get routed to professionals, never coached through.
 - Persona content itself belongs to the `roster` agent (`app/coaches.py`) —
   coordinate; you own the plumbing, roster owns the personalities.
 
