@@ -712,6 +712,29 @@ def step_stats(data):
             'hits_14': len(hit_dates & last14)}
 
 
+def watch_insights(data):
+    """Buy-window verdict per price watch, from its own history."""
+    out = []
+    for w in data.get('watches', []):
+        prices = [p['price'] for p in w.get('history', []) if p.get('price') is not None]
+        if not prices:
+            out.append({'item': w['item'], 'verdict': None})
+            continue
+        latest, best = prices[-1], min(prices)
+        mid = sorted(prices)[len(prices) // 2]
+        if latest <= best:
+            verdict, text = 'best', 'lowest price seen — buy window'
+        elif latest <= mid:
+            verdict, text = 'typical', 'around its usual price'
+        else:
+            verdict, text = 'high', f'above typical — best seen {best}'
+        out.append({'item': w['item'], 'verdict': verdict, 'text': text,
+                    'latest': latest, 'best': best,
+                    'vs_best_pct': round((latest - best) / best * 100) if best else 0,
+                    'points': len(prices)})
+    return out
+
+
 def consecutive_days(dates_set):
     """Days-in-a-row ending today that appear in the given date set."""
     streak, day = 0, date.today()

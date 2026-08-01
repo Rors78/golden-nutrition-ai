@@ -6,6 +6,24 @@ export function renderDeals(root, state) {
   root.append(el('<h2 class="section-title">Deal Finder</h2>'));
   root.append(el('<p class="section-sub">Build the list, let Claude hunt the prices, watch the good ones — the app pings your phone when they drop.</p>'));
 
+  // ── restock radar: supplements running low, one tap from the stack ──
+  const low = (state.stats?.checklist || []).filter(c => c.low);
+  if (low.length) {
+    const names = [...new Set(low.map(c => c.name))];
+    const inList = new Set((state.shopping_list || []).map(i => i.toLowerCase()));
+    const missing = names.filter(n => !inList.has(n.toLowerCase()));
+    const radar = el(`<div class="callout warn" style="margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <span style="flex:1;min-width:220px"><strong>Restock radar:</strong> ${names.map(esc).join(', ')}
+        ${names.length > 1 ? 'are' : 'is'} running low in your stack.</span>
+      ${missing.length ? '<button class="ghost-btn" type="button" style="flex:0 1 auto;min-height:34px;padding:6px 12px;font-size:12px">Add to shopping list</button>' : '<span style="font-size:12px;color:var(--muted)">already on the list</span>'}
+    </div>`);
+    radar.querySelector('button')?.addEventListener('click', async () => {
+      try { await api('POST', '/shopping', { items: missing }); toast('Added to the list'); await refresh(); }
+      catch (e) { toast(e.message); }
+    });
+    root.append(radar);
+  }
+
   // ── shopping list ──
   const shop = el(`<div class="card">
     <p class="chart-title">Shopping list</p>
@@ -96,7 +114,8 @@ export function renderDeals(root, state) {
       const card = el(`<div class="deal">
         <div class="deal-top"><span class="deal-item">${esc(deal.item)}</span>
           <span class="deal-price">${esc(deal.price)}</span></div>
-        <div class="deal-meta">${esc(deal.store)}${deal.deal ? ` — ${esc(deal.deal)}` : ''}</div>
+        <div class="deal-meta">${esc(deal.store)}${deal.deal ? ` — ${esc(deal.deal)}` : ''}
+          ${deal.unit_price ? ` · <span style="color:var(--steel);font-family:var(--font-mono)">${esc(deal.unit_price)}</span>` : ''}</div>
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
           ${deal.url ? `<a href="${esc(deal.url)}" target="_blank" rel="noopener noreferrer">${esc(deal.url)} ↗</a>` : ''}
           <button class="ghost-btn watch-btn" type="button" style="min-height:32px;padding:5px 12px;font-size:12px">Watch price</button>
@@ -139,8 +158,17 @@ export function renderDeals(root, state) {
     </div>
     <p style="color:var(--ink-2);font-size:13px;margin:8px 0 0">Watched items get re-searched on demand (or on the daily timer) —
       a real drop pings your phone.</p>
+    <div class="watch-summary"></div>
     <div class="watch-list" style="display:grid;gap:10px;margin-top:10px"></div>
   </div>`);
+  const insights = state.stats?.watch_insights || [];
+  const byItem = Object.fromEntries(insights.map(i => [i.item, i]));
+  const atBest = insights.filter(i => i.verdict === 'best' && i.points > 1).length;
+  if (atBest) {
+    watchCard.querySelector('.watch-summary').append(el(
+      `<div class="callout good" style="margin-top:10px">${atBest} of your ${insights.length}
+        watches ${atBest > 1 ? 'are' : 'is'} at the lowest price seen — buy window is open.</div>`));
+  }
   const wl = watchCard.querySelector('.watch-list');
   if (!watches.length) {
     wl.append(el('<div class="empty">No watches yet — hit “Watch price” on any deal above.</div>'));
@@ -150,7 +178,13 @@ export function renderDeals(root, state) {
     const best = w.history.length ? Math.min(...w.history.map(p => p.price)) : null;
     const row = el(`<div style="border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg);padding:12px 14px;display:grid;gap:6px">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap">
-        <strong>${esc(w.item)}</strong>
+        <strong>${esc(w.item)}${(() => {
+          const ins = byItem[w.item];
+          if (!ins?.verdict || ins.points < 2) return '';
+          const color = ins.verdict === 'best' ? 'var(--good)' : ins.verdict === 'high' ? 'var(--warn)' : 'var(--muted)';
+          return ` <span title="${esc(ins.text)}" style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+            color:${color};border:1px solid ${color};border-radius:999px;padding:2px 8px;vertical-align:middle">${esc(ins.verdict)}</span>`;
+        })()}</strong>
         <span style="font-family:var(--font-mono);font-size:13px">
           ${latest ? `latest <span style="color:var(--gold-bright)">${esc(latest.raw || latest.price)}</span> · ${esc(latest.store)}` : 'no price points yet'}
           ${best != null && latest && latest.price > best ? ` · best ${best}` : ''}</span>
