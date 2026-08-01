@@ -35,6 +35,62 @@ export function renderWorkouts(root, state) {
     root.append(grid);
   }
 
+  // ── recent PRs ──
+  const prsFeed = state.stats.recent_prs || [];
+  if (prsFeed.length) {
+    const prCard = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Recent PRs — the trophy shelf</p>
+      <div class="pr-list" style="display:grid;gap:6px;margin-top:10px"></div></div>`);
+    const list = prCard.querySelector('.pr-list');
+    for (const pr of prsFeed) {
+      list.append(el(`<div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;border-left:3px solid var(--gold);padding:4px 12px">
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">${esc(pr.date)}</span>
+        <span style="flex:1;min-width:160px;font-weight:600;font-size:13px">${esc(pr.exercise)}</span>
+        <span style="font-family:var(--font-mono);font-size:13px;color:var(--gold-bright);font-weight:700">${pr.weight} lbs</span>
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--good)">▲ up from ${pr.prev}</span>
+      </div>`));
+    }
+    root.append(prCard);
+  }
+
+  // ── training load & balance ──
+  const mb = state.stats.muscle_balance || { groups: [] };
+  const wv = state.stats.weekly_volume || [];
+  if (mb.groups.length || wv.some(w => w.volume > 0)) {
+    const loadCard = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Training load &amp; balance</p>
+      <div class="grid-2" style="margin-top:8px;align-items:start">
+        <div class="chart wv-chart" style="min-height:180px"></div>
+        <div class="mb-split">
+          <p style="margin:0 0 8px;font-size:11px;color:var(--muted);font-family:var(--font-mono)">Volume by muscle group · ${mb.days}d</p>
+        </div>
+      </div></div>`);
+    root.append(loadCard);
+    if (mb.warning) {
+      loadCard.querySelector('.chart-title').insertAdjacentElement('afterend',
+        el(`<div class="callout warn" style="margin-top:10px">${esc(mb.warning)}</div>`));
+    }
+    const split = loadCard.querySelector('.mb-split');
+    const maxPct = Math.max(1, ...mb.groups.map(g => g.pct));
+    mb.groups.forEach((g, i) => {
+      split.append(el(`<div style="display:flex;align-items:center;gap:10px;margin:6px 0">
+        <span style="flex:0 0 82px;font-size:12px;color:var(--ink-2)">${esc(g.group)}</span>
+        <span style="flex:1;height:10px;background:var(--bg);border-radius:3px;overflow:hidden">
+          <span style="display:block;height:100%;width:${Math.round(g.pct / maxPct * 100)}%;border-radius:3px;background:${i === 0 ? 'var(--gold)' : 'var(--steel)'}"></span></span>
+        <span style="flex:0 0 74px;text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--muted)">${g.pct}% · ${g.volume.toLocaleString()}</span>
+      </div>`));
+    });
+    if (!mb.groups.length) split.append(el('<div class="empty">Log sets with weight to see your split.</div>'));
+    Plotly.newPlot(loadCard.querySelector('.wv-chart'),
+      [{ x: wv.map(w => w.week_start), y: wv.map(w => w.volume), type: 'bar',
+         marker: { color: CHART.gold, cornerradius: 3 },
+         customdata: wv.map(w => w.sessions),
+         hovertemplate: 'week of %{x}<br>%{y:,.0f} lbs · %{customdata} sessions<extra></extra>' }],
+      CHART.layout({ height: 180, bargap: .35, margin: { l: 48, r: 8, t: 20, b: 30 },
+        title: { text: 'Weekly volume · 8 weeks', font: { size: 11, color: '#8b93a1' }, x: 0 } }),
+      CHART.config);
+  }
+
   // ── log form ──
   const now = new Date();
   const form = el(`<form class="panel" style="margin-top:14px">
@@ -60,7 +116,9 @@ export function renderWorkouts(root, state) {
     const series = progression[name];
     if (!series?.length) return '';
     const last = series[series.length - 1];
-    return `Last time (${last.date}): top ${Number(last.top).toLocaleString()} lbs · ${Math.round(last.volume).toLocaleString()} lbs volume — beat it.`;
+    const allTimeTop = Math.max(...series.map(s => s.top));
+    const target = allTimeTop > 0 ? ` Target: ${allTimeTop + 2.5}+ lbs for a PR.` : '';
+    return `Last time (${last.date}): top ${Number(last.top).toLocaleString()} lbs · ${Math.round(last.volume).toLocaleString()} lbs volume.${target}`;
   }
 
   function addExRow(vals = {}) {
@@ -214,8 +272,10 @@ export function renderWorkouts(root, state) {
     const series = progression[chosen];
     const pr = Math.max(...series.map(s => s.top));
     const bestVol = Math.max(...series.map(s => s.volume));
+    const bestE1rm = Math.max(...series.map(s => s.e1rm ?? 0));
     card.querySelector('.prog-stats').append(
       metric('All-time PR', pr, { suffix: ' lbs' }),
+      metric('Est. 1RM', Math.round(bestE1rm), { suffix: ' lbs', small: 'Epley, best set' }),
       metric('Best day volume', Math.round(bestVol), { suffix: ' lbs', small: 'sets×reps×wt' }),
       metric('Sessions', series.length, {}),
     );
