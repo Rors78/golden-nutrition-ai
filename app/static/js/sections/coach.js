@@ -10,13 +10,37 @@ export function renderCoach(root, state) {
   root.append(el('<h2 class="section-title">Coach</h2>'));
   root.append(el('<p class="section-sub">Pick your coach — every plan and review comes in their style. Personas are inspired by each figure\'s public training philosophy.</p>'));
 
-  // ── roster ──
+  // ── fit line + roster filters ──
+  const fit = state.stats.coach_fit || { ids: [] };
+  const fitIds = new Set(fit.ids || []);
+  if (fit.ids?.length) {
+    const names = fit.ids.map(id => coaches.find(c => c.id === id)?.name).filter(Boolean);
+    root.append(el(`<div class="callout" style="margin-bottom:12px">You're <strong>${esc(fit.label)}</strong> right now —
+      a natural fit: ${names.map(esc).join(', ')}. But the best coach is the one whose voice you'll actually listen to.</div>`));
+  }
+  const CATS = {
+    'Muscle': ['cutler', 'arnold', 'nippard', 'hall', 'heria', 'serena'],
+    'Fat loss': ['wicks', 'simmons', 'casseyho', 'austin', 'goggins', 'phelps'],
+    'Conditioning': ['fraser', 'tyson', 'bolt', 'phelps', 'goggins'],
+    'Mobility & recovery': ['adriene', 'jetli', 'biles', 'casseyho'],
+    'Strength & longevity': ['hall', 'pavel', 'lalanne'],
+  };
+  const filterBar = el(`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+    <input type="search" placeholder="Search 20 coaches…" style="flex:1 1 180px;max-width:260px;min-height:36px;padding:6px 12px;font-size:13px">
+    ${['All', ...Object.keys(CATS)].map((k, i) =>
+      `<button type="button" class="ghost-btn cat-chip${i === 0 ? ' active' : ''}" data-cat="${esc(k)}"
+        style="min-height:32px;padding:5px 12px;font-size:12px">${esc(k)}</button>`).join('')}
+  </div>`);
+  root.append(filterBar);
+
   const grid = el('<div class="coach-grid"></div>');
+  const cardById = {};
   for (const c of coaches) {
     const initials = c.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
     const card = el(`<button type="button" class="coach-card${c.id === selected?.id ? ' selected' : ''}">
       <span class="plate-disc" style="width:44px;height:44px;font-size:14px">${esc(initials)}</span>
-      <span class="coach-name">${esc(c.name)}</span>
+      <span class="coach-name">${esc(c.name)}
+        ${fitIds.has(c.id) ? '<span style="font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--good);border:1px solid var(--good);border-radius:999px;padding:2px 7px;margin-left:6px;vertical-align:middle">good fit</span>' : ''}</span>
       <span class="coach-style">${esc(c.style)}</span>
       <span class="coach-goal">${esc(c.goal)}</span>
       <span class="coach-vibe">${esc(c.vibe)}</span>
@@ -29,9 +53,50 @@ export function renderCoach(root, state) {
         await refresh();
       } catch (e) { toast(e.message); }
     });
+    cardById[c.id] = card;
     grid.append(card);
   }
   root.append(grid);
+
+  let activeCat = 'All';
+  const searchBox = filterBar.querySelector('input');
+  const applyFilter = () => {
+    const q = searchBox.value.trim().toLowerCase();
+    for (const c of coaches) {
+      const inCat = activeCat === 'All' || (CATS[activeCat] || []).includes(c.id);
+      const inSearch = !q || `${c.name} ${c.goal} ${c.style} ${c.vibe}`.toLowerCase().includes(q);
+      cardById[c.id].style.display = inCat && inSearch ? '' : 'none';
+    }
+  };
+  searchBox.addEventListener('input', applyFilter);
+  const paintChips = () => filterBar.querySelectorAll('.cat-chip').forEach(x => {
+    const on = x.dataset.cat === activeCat;
+    x.style.borderColor = on ? 'var(--gold)' : '';
+    x.style.color = on ? 'var(--gold-bright)' : '';
+  });
+  paintChips();
+  filterBar.querySelectorAll('.cat-chip').forEach(chip => chip.addEventListener('click', () => {
+    activeCat = chip.dataset.cat;
+    paintChips();
+    applyFilter();
+  }));
+
+  // ── the dossier: the research behind the selected coach ──
+  if (selected) {
+    root.append(el(`<details class="card" style="margin-top:14px">
+      <summary style="cursor:pointer;list-style:none">
+        <span class="chart-title">${esc(selected.name)}'s dossier — how this persona coaches</span>
+        <span style="color:var(--muted);font-size:12px;margin-left:8px">click to open</span></summary>
+      <div style="display:grid;gap:12px;margin-top:12px;font-size:13px;color:var(--ink-2);line-height:1.65">
+        <div><strong style="color:var(--gold-bright)">Training</strong><br>${esc(selected.workout || '')}</div>
+        <div><strong style="color:var(--gold-bright)">Nutrition</strong><br>${esc(selected.nutrition || '')}</div>
+        <div><strong style="color:var(--gold-bright)">Supplements</strong><br>${esc(selected.supplements || '')}</div>
+        <div><strong style="color:var(--steel)">Voice</strong><br>${esc(selected.voice || '')}</div>
+        <div style="border-left:3px solid var(--warn);padding-left:12px;color:var(--muted)">
+          <strong style="color:var(--warn)">The fine print</strong><br>${esc(selected.caveats || '')}</div>
+      </div>
+    </details>`));
+  }
 
   // ── live chat with your coach ──
   const chatCard = el(`<div class="card" style="margin-top:14px">
@@ -40,6 +105,10 @@ export function renderCoach(root, state) {
       ${(state.coach_chat || []).length ? '<button class="ghost-btn chat-clear" type="button" style="flex:0 1 auto;min-height:34px;padding:6px 12px;font-size:12px">Clear thread</button>' : ''}
     </div>
     <div class="chat-log"></div>
+    <div class="quick-asks" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 4px">
+      ${['Should I train today?', 'What do I eat before the gym?', 'How is my week looking?', 'I need a push — talk to me']
+        .map(q => `<button type="button" class="ghost-btn qa-chip" style="min-height:30px;padding:4px 12px;font-size:12px">${q}</button>`).join('')}
+    </div>
     <form class="form-row">
       <label style="flex:1 1 260px"><input name="message" type="text" autocomplete="off"
         placeholder="should I still train today? · what do I eat before the gym? · my knee felt off on squats"></label>
@@ -91,6 +160,10 @@ export function renderCoach(root, state) {
       chatForm.message.focus();
     }
   });
+  chatCard.querySelectorAll('.qa-chip').forEach(chip => chip.addEventListener('click', () => {
+    chatForm.message.value = chip.textContent;
+    chatForm.requestSubmit();
+  }));
   const clearBtn = chatCard.querySelector('.chat-clear');
   if (clearBtn) clearBtn.addEventListener('click', async () => {
     try { await api('DELETE', '/coach/chat'); toast('Thread cleared'); await refresh(); }
