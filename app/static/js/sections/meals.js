@@ -50,6 +50,8 @@ export function renderMeals(root, state) {
       <label style="flex:3 1 260px">What did you eat?
         <input name="description" type="text" placeholder="chicken burrito with rice and beans, and a protein shake" autocomplete="off"></label>
       <button class="gold-btn" type="submit">Estimate with AI</button>
+      <button class="ghost-btn photo-btn" type="button" style="flex:0 1 auto">Snap the plate</button>
+      <input type="file" accept="image/*" capture="environment" hidden class="photo-input">
     </form>
     <div class="ai-result"></div>
   </div>`);
@@ -69,6 +71,30 @@ export function renderMeals(root, state) {
       aiResult.innerHTML = '';
       toast(err.message);
     } finally { btn.disabled = false; }
+  });
+
+  const photoBtn = aiCard.querySelector('.photo-btn');
+  const photoInput = aiCard.querySelector('.photo-input');
+  photoBtn.addEventListener('click', () => photoInput.click());
+  photoInput.addEventListener('change', () => {
+    const file = photoInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      photoBtn.disabled = true;
+      aiResult.innerHTML = '<p style="margin:12px 0 0"><span class="spinner"></span>Claude is looking at your plate — about a minute…</p>';
+      try {
+        const { meals } = await api('POST', '/meals/photo', { image: reader.result });
+        showParsed(meals);
+      } catch (err) {
+        aiResult.innerHTML = '';
+        toast(err.message);
+      } finally {
+        photoBtn.disabled = false;
+        photoInput.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
   });
 
   function showParsed(meals) {

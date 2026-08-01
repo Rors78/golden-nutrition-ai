@@ -442,6 +442,112 @@ def daily_briefing(profile, persona, context):
     )
 
 
+def parse_meal_photo(image_path):
+    """Estimate macros from a photo of the plate. CLI path uses Claude Code's
+    vision via the Read tool; SDK path sends the image as a content block."""
+    if cli_available():
+        prompt = (
+            f"Read the meal photo at {image_path} and act as a nutrition expert: "
+            "identify the foods and estimate realistic portions from the visual. "
+            f"{NUTRITIONIST_PROMPT}\n\n"
+            "Respond with ONLY a JSON object — no markdown fences, no commentary — "
+            "in exactly this shape:\n"
+            '{"meals": [{"name": "...", "protein": 0, "calories": 0, '
+            '"carbs": 0, "fat": 0, "fiber": 0}]}'
+        )
+        env = dict(os.environ)
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("ANTHROPIC_AUTH_TOKEN", None)
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "text",
+             "--allowedTools", "Read"],
+            capture_output=True, text=True, timeout=300, env=env,
+            cwd=os.path.dirname(image_path) or tempfile.gettempdir(),
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise RuntimeError(f"Claude Code CLI failed: {detail[:500] or 'unknown error'}")
+        meals = _extract_json(result.stdout.strip())["meals"]
+    elif backend_name():
+        import base64
+        with open(image_path, 'rb') as f:
+            b64 = base64.standard_b64encode(f.read()).decode()
+        media = 'image/png' if image_path.lower().endswith('.png') else 'image/jpeg'
+        response = _sdk_create(
+            model=CLAUDE_MODEL,
+            max_tokens=16000,
+            system=NUTRITIONIST_PROMPT,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64",
+                                             "media_type": media, "data": b64}},
+                {"type": "text", "text": "Identify the foods in this photo and estimate the macros."},
+            ]}],
+            output_config={"format": {"type": "json_schema", "schema": MEAL_SCHEMA}},
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("Claude declined to process this photo.")
+        meals = json.loads(next(b.text for b in response.content if b.type == "text"))["meals"]
+    else:
+        raise AIUnavailable(
+            "No Claude backend found. Install Claude Code and log in (uses your "
+            "Claude subscription), or set ANTHROPIC_API_KEY."
+        )
+
+    cleaned = []
+    for m in meals:
+        if not str(m.get('name', '')).strip():
+            continue
+        cleaned.append({
+            'name': str(m['name']).strip(),
+            'protein': clean_num(m.get('protein')),
+            'calories': clean_num(m.get('calories')),
+            'carbs': clean_num(m.get('carbs')),
+            'fat': clean_num(m.get('fat')),
+            'fiber': clean_num(m.get('fiber')),
+        })
+    if not cleaned:
+        raise RuntimeError("Couldn't identify any food in that photo — try a clearer shot.")
+    return cleaned
+
+
+VOICE_PROMPT = (
+    "You route voice commands for a fitness tracking app. Given a transcript, "
+    "decide the single action and extract its fields. Actions:\n"
+    "- meal: the user says food they ate → description = the food text\n"
+    "- weight: a body weigh-in → pounds (number)\n"
+    "- supplement: they took a supplement → name, time (Morning/Afternoon/Evening/"
+    "Pre-Workout/Post-Workout — infer from context, default Morning)\n"
+    "- unknown: anything else → reason (one short line)\n"
+)
+
+
+def route_voice(transcript):
+    """Voice transcript → {action, ...fields}. Small, fast, structured."""
+    shape = (
+        "Respond with ONLY a JSON object — no fences, no commentary:\n"
+        '{"action": "meal|weight|supplement|unknown", "description": "...", '
+        '"pounds": 0, "name": "...", "time": "...", "reason": "..."}\n'
+        "Include only the fields relevant to the action."
+    )
+    ask = f"{VOICE_PROMPT}\nTranscript: \"{transcript}\"\n\n{shape}"
+    if cli_available():
+        return _extract_json(_run_cli(ask, timeout=120))
+    if backend_name():
+        response = _sdk_create(
+            model=CLAUDE_MODEL,
+            max_tokens=4000,
+            system=VOICE_PROMPT,
+            messages=[{"role": "user", "content": f'Transcript: "{transcript}"\n\n{shape}'}],
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("Claude declined to process this request.")
+        return _extract_json(next(b.text for b in response.content if b.type == "text"))
+    raise AIUnavailable(
+        "No Claude backend found. Install Claude Code and log in (uses your "
+        "Claude subscription), or set ANTHROPIC_API_KEY."
+    )
+
+
 def coaching_summary(week_data, persona=None):
     """Weekly coaching write-up (markdown) from the last 7 days of data.
 

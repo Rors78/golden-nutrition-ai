@@ -277,6 +277,118 @@ def vitals_summary(data):
     }
 
 
+def readiness(data):
+    """0-100 readiness from today's vitals vs the user's own 28-day baselines.
+    Components: sleep (40%), HRV (35%), resting HR (25%) — renormalized over
+    whichever are available. Informational guidance, never medical advice."""
+    vitals = sorted(data.get('vitals', []), key=lambda v: v['date'])
+    if not vitals:
+        return {'has_data': False}
+    latest = vitals[-1]
+    prior = [v for v in vitals if v['date'] < latest['date']]
+    cutoff = (date.today() - timedelta(days=28)).isoformat()
+
+    def baseline(field):
+        vals = [v[field] for v in prior if v['date'] >= cutoff and v.get(field) is not None]
+        return sum(vals) / len(vals) if vals else None
+
+    clamp = lambda x: max(0, min(100, round(x)))
+    comps = {}
+    if latest.get('sleep_h') is not None:
+        target = max(7.5, baseline('sleep_h') or 0)
+        comps['sleep'] = {'score': clamp(100 * latest['sleep_h'] / target),
+                          'value': latest['sleep_h'], 'baseline': round(target, 1)}
+    if latest.get('hrv_ms') is not None and baseline('hrv_ms'):
+        b = baseline('hrv_ms')
+        comps['hrv'] = {'score': clamp(100 * latest['hrv_ms'] / b),
+                        'value': latest['hrv_ms'], 'baseline': round(b, 1)}
+    if latest.get('resting_hr') is not None and baseline('resting_hr'):
+        b = baseline('resting_hr')
+        comps['resting_hr'] = {'score': clamp(100 * b / latest['resting_hr']),
+                               'value': latest['resting_hr'], 'baseline': round(b, 1)}
+    if not comps:
+        return {'has_data': False}
+
+    weights = {'sleep': 0.4, 'hrv': 0.35, 'resting_hr': 0.25}
+    total_w = sum(weights[k] for k in comps)
+    score = round(sum(comps[k]['score'] * weights[k] for k in comps) / total_w)
+    if score >= 80:
+        level, guidance = 'primed', 'Green light — a big session will land well today.'
+    elif score >= 60:
+        level, guidance = 'ready', 'Solid. Train as planned; save the heroics for a primed day.'
+    elif score >= 40:
+        level, guidance = 'caution', 'Recovery is lagging — trim volume or intensity today.'
+    else:
+        level, guidance = 'recover', 'The body is asking for rest. Easy movement, food, sleep.'
+    return {'has_data': True, 'score': score, 'level': level,
+            'guidance': guidance, 'date': latest['date'], 'components': comps}
+
+
+def achievements(data):
+    """The trophy wall — earned by data, never by hand. Cutler-approved."""
+    workouts = data['workouts']
+    meals = data['meals']
+    trn = training_summary(data)
+    adh = supplement_adherence(data)
+
+    def consecutive_days(dates_set):
+        streak, day = 0, date.today()
+        while day.isoformat() in dates_set:
+            streak += 1
+            day -= timedelta(days=1)
+        return streak
+
+    day_volume = {}
+    for w in workouts:
+        vol = sum(e.get('sets', 0) * e.get('reps', 0) * e.get('weight', 0)
+                  for e in w.get('exercises', []))
+        day_volume[w['date']] = day_volume.get(w['date'], 0) + vol
+    biggest_day = round(max(day_volume.values())) if day_volume else 0
+
+    prog = progression(data)
+    pr_count = sum(1 for series in prog.values()
+                   if len(series) > 1 and series[-1]['top'] > max(s['top'] for s in series[:-1]))
+
+    meal_days = {m['date'] for m in meals}
+    protein_goal = data['profile'].get('daily_protein_g', 150)
+    protein_by_day = {}
+    for m in meals:
+        protein_by_day[m['date']] = protein_by_day.get(m['date'], 0) + m.get('protein', 0)
+    sniper_days = {d for d, p in protein_by_day.items() if p >= protein_goal * 0.95}
+
+    defs = [
+        ('first_blood', 'First Blood', 'Log your first workout.',
+         len(workouts) >= 1, len(workouts), 1),
+        ('iron_week', 'Iron Week', '3+ sessions in a week.',
+         trn['streak_weeks'] >= 1, trn['sessions_7d'], 3),
+        ('month_of_iron', 'Month of Iron', 'Four straight weeks of 3+ sessions.',
+         trn['streak_weeks'] >= 4, trn['streak_weeks'], 4),
+        ('peanut', "Ain't Nothin' But a Peanut", '25 workouts logged.',
+         len(workouts) >= 25, len(workouts), 25),
+        ('quad_stomp', 'Quad Stomp', '10,000 lbs of volume in a single day.',
+         biggest_day >= 10000, biggest_day, 10000),
+        ('pr_machine', 'PR Machine', 'Set a new all-time top on any lift.',
+         pr_count >= 1, pr_count, 1),
+        ('feeder', 'The Feeder', 'Log meals 7 days in a row.',
+         consecutive_days(meal_days) >= 7, consecutive_days(meal_days), 7),
+        ('centurion', 'Centurion', '100 meals logged.',
+         len(meals) >= 100, len(meals), 100),
+        ('macro_sniper', 'Macro Sniper', 'Hit your protein goal 3 days running.',
+         len(sniper_days) >= 3, len(sniper_days), 3),
+        ('clean_stack', 'Clean Stack', 'A full week of 100% supplement adherence.',
+         bool(adh.get('has_schedule')) and adh.get('pct') == 100,
+         adh.get('pct', 0) if adh.get('has_schedule') else 0, 100),
+        ('scale_watcher', 'Scale Watcher', 'Weigh in 7 days in a row.',
+         consecutive_days({w['date'] for w in data['weights']}) >= 7,
+         consecutive_days({w['date'] for w in data['weights']}), 7),
+        ('wired_in', 'Wired In', 'First vitals synced from the wrist (or logged).',
+         len(data.get('vitals', [])) >= 1, len(data.get('vitals', [])), 1),
+    ]
+    return [{'id': i, 'name': n, 'desc': d, 'earned': e,
+             'progress': min(p, target), 'target': target}
+            for i, n, d, e, p, target in defs]
+
+
 def checklist(data):
     today = date.today().isoformat()
     items = []

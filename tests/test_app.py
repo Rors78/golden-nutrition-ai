@@ -402,6 +402,77 @@ def test_briefing_generates_pushes_and_caches(client, monkeypatch):
     assert state["briefing"]["coach"] == "goggins"
 
 
+def test_readiness_engine(client):
+    token_state = client.get("/api/state").get_json()
+    assert token_state["stats"]["readiness"] == {"has_data": False}
+    token = token_state["settings"]["ingest_token"]
+
+    # 5 baseline days, then a rough night
+    days = [{"date": (date.today() - timedelta(days=i)).isoformat(),
+             "sleep_h": 7.5, "hrv_ms": 50, "resting_hr": 60} for i in range(1, 6)]
+    days.append({"date": date.today().isoformat(),
+                 "sleep_h": 6.0, "hrv_ms": 40, "resting_hr": 66})
+    client.post(f"/api/ingest?token={token}", json={"days": days})
+
+    rd = client.get("/api/state").get_json()["stats"]["readiness"]
+    assert rd["has_data"] is True
+    assert rd["components"]["sleep"]["score"] == 80      # 6.0 / 7.5
+    assert rd["components"]["hrv"]["score"] == 80        # 40 / 50
+    assert rd["components"]["resting_hr"]["score"] == 91  # 60 / 66
+    assert rd["score"] == 83 and rd["level"] == "primed"
+
+
+def test_achievements_wall(client):
+    seed(week_of_data())
+    badges = {b["id"]: b for b in client.get("/api/state").get_json()["stats"]["achievements"]}
+    assert badges["first_blood"]["earned"] is True
+    assert badges["iron_week"]["earned"] is True          # 6 sessions this week
+    assert badges["quad_stomp"]["earned"] is False        # ~3k lbs day vs 10k
+    assert badges["peanut"]["earned"] is False and badges["peanut"]["progress"] == 6
+    assert badges["wired_in"]["earned"] is False
+
+
+def test_photo_endpoint(client, monkeypatch):
+    fake = [{"name": "Grilled chicken plate", "protein": 45, "calories": 520,
+             "carbs": 40, "fat": 15, "fiber": 5}]
+    seen = {}
+    monkeypatch.setattr(ai, "parse_meal_photo", lambda path: seen.update(path=path) or fake)
+    tiny_png = ("data:image/png;base64,"
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+                "2mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=")
+    r = client.post("/api/meals/photo", json={"image": tiny_png})
+    assert r.status_code == 200 and r.get_json()["meals"] == fake
+    assert seen["path"].endswith(".png")
+    assert client.post("/api/meals/photo", json={"image": "nope"}).status_code == 400
+
+
+def test_voice_routing(client, monkeypatch):
+    monkeypatch.setattr(ai, "route_voice",
+                        lambda t: {"action": "weight", "pounds": 199.5})
+    r = client.post("/api/voice", json={"text": "weigh in at one ninety nine and a half"})
+    assert r.status_code == 200 and "199.5" in r.get_json()["message"]
+    assert client.get("/api/state").get_json()["profile"]["weight"] == 199.5
+
+    monkeypatch.setattr(ai, "route_voice",
+                        lambda t: {"action": "supplement", "name": "Creatine", "time": "Morning"})
+    r = client.post("/api/voice", json={"text": "took my creatine"})
+    assert r.get_json()["action"] == "supplement"
+
+    monkeypatch.setattr(ai, "route_voice",
+                        lambda t: {"action": "meal", "description": "chicken and rice"})
+    monkeypatch.setattr(ai, "parse_meals",
+                        lambda d: [{"name": "Chicken and rice", "protein": 50,
+                                    "calories": 600, "carbs": 60, "fat": 10, "fiber": 3}])
+    r = client.post("/api/voice", json={"text": "log chicken and rice"})
+    assert "50g protein" in r.get_json()["message"]
+    meal = client.get("/api/state").get_json()["meals"][-1]
+    assert meal["notes"] == "Logged by voice"
+
+    monkeypatch.setattr(ai, "route_voice",
+                        lambda t: {"action": "unknown", "reason": "not a log command"})
+    assert client.post("/api/voice", json={"text": "what is love"}).status_code == 400
+
+
 def test_pwa_surfaces(client):
     assert client.get("/sw.js").status_code == 200
     assert b"manifest.webmanifest" in client.get("/").data

@@ -49,10 +49,19 @@ export function renderDashboard(root, state) {
 
   // Hero: the two rings that define the day
   const hero = el('<div class="card"><div class="rings"></div></div>');
-  hero.querySelector('.rings').append(
+  const rings = hero.querySelector('.rings');
+  rings.append(
     ring('Protein', t.totals.protein, p.daily_protein_g, 'g', { size: 170 }),
     ring('Calories', t.totals.calories, p.daily_calories, '', { size: 170, steel: true }),
   );
+  const rd = state.stats.readiness;
+  if (rd?.has_data) {
+    const rdRing = ring('Readiness', rd.score, 100, '', { size: 170 });
+    rdRing.classList.add('readiness');
+    rdRing.querySelector('.ring-sub').textContent = `${rd.level} · ${rd.date}`;
+    rings.append(rdRing);
+    hero.append(el(`<p style="text-align:center;color:var(--ink-2);font-size:13px;margin:10px 0 0">${esc(rd.guidance)}</p>`));
+  }
   root.append(hero);
 
   const grid = el('<div class="cards metrics" style="margin-top:14px"></div>');
@@ -106,6 +115,26 @@ export function renderDashboard(root, state) {
     </div>`);
     strip.querySelector('button').addEventListener('click', () => { location.hash = 'coach'; });
     root.append(strip);
+  }
+
+  // Trophy wall — earned by data, never by hand
+  const badges = state.stats.achievements || [];
+  if (badges.length) {
+    const earned = badges.filter(b => b.earned).length;
+    const wall = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Trophy wall · ${earned}/${badges.length}</p>
+      <div class="trophy-grid" style="display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));margin-top:10px"></div>
+    </div>`);
+    const grid2 = wall.querySelector('.trophy-grid');
+    for (const b of [...badges].sort((x, y) => y.earned - x.earned)) {
+      grid2.append(el(`<div style="display:flex;gap:12px;align-items:center;opacity:${b.earned ? 1 : .55}">
+        <span class="plate-disc ${b.earned ? '' : 'iron'}" style="width:40px;height:40px;font-size:13px">${esc(b.name.replace(/[^A-Za-z ]/g, '').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase())}</span>
+        <span style="min-width:0">
+          <span style="display:block;font-weight:800;font-size:13px">${esc(b.name)}</span>
+          <span style="display:block;color:var(--muted);font-size:12px">${esc(b.desc)}${b.earned ? '' : ` · ${b.progress}/${b.target}`}</span>
+        </span></div>`));
+    }
+    root.append(wall);
   }
 
   const two = el('<div class="cards two" style="margin-top:14px"></div>');

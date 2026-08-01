@@ -90,6 +90,8 @@ def get_state():
             'adherence': stats.supplement_adherence(d),
             'training': stats.training_summary(d),
             'vitals': stats.vitals_summary(d),
+            'readiness': stats.readiness(d),
+            'achievements': stats.achievements(d),
         },
         'ai_backend': ai.backend_name(),
         'recovery_note': note,
@@ -213,6 +215,95 @@ def suggest_meals():
         return _err(e, 502)
 
 
+@bp.post('/meals/photo')
+def meals_photo():
+    """Photo of the plate → Claude vision → macro estimates (review, then add)."""
+    import base64
+    import tempfile as tf
+    body = request.get_json(force=True)
+    data_url = str(body.get('image', ''))
+    if ';base64,' not in data_url:
+        return _err('Send the photo as a base64 data URL.')
+    header, b64 = data_url.split(';base64,', 1)
+    suffix = '.png' if 'png' in header else '.jpg'
+    try:
+        raw = base64.b64decode(b64)
+    except Exception:
+        return _err('That image data did not decode.')
+    if len(raw) > 12 * 1024 * 1024:
+        return _err('Photo too large — keep it under 12 MB.')
+    path = None
+    try:
+        with tf.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(raw)
+            path = f.name
+        return jsonify({'meals': ai.parse_meal_photo(path)})
+    except Exception as e:
+        return _err(e, 502)
+    finally:
+        if path:
+            try:
+                import os as _os
+                _os.unlink(path)
+            except OSError:
+                pass
+
+
+@bp.post('/voice')
+def voice():
+    """Voice transcript → routed action → executed. Hands-free logging."""
+    body = request.get_json(force=True)
+    transcript = str(body.get('text', '')).strip()
+    if not transcript:
+        return _err('Empty transcript.')
+    try:
+        route = ai.route_voice(transcript)
+    except Exception as e:
+        return _err(e, 502)
+    action = route.get('action')
+    d = store.load()
+
+    if action == 'meal':
+        desc = str(route.get('description', transcript)).strip()
+        try:
+            meals = ai.parse_meals(desc)
+        except Exception as e:
+            return _err(e, 502)
+        now = datetime.now().strftime('%H:%M')
+        for m in meals:
+            d['meals'].append(_normalize_meal({**m, 'date': date.today().isoformat(),
+                                               'time': now, 'notes': 'Logged by voice'}))
+        store.save(d)
+        total_p = sum(m['protein'] for m in meals)
+        return jsonify({'ok': True, 'action': 'meal',
+                        'message': f"Logged {len(meals)} item(s) — {total_p}g protein."})
+
+    if action == 'weight':
+        lbs = clean_num(route.get('pounds'), float)
+        if lbs <= 0:
+            return _err("Didn't catch the weight — try 'weigh in at 200 pounds'.")
+        day = date.today().isoformat()
+        d['weights'] = [w for w in d['weights'] if w['date'] != day]
+        d['weights'].append({'date': day, 'weight': lbs})
+        d['weights'].sort(key=lambda w: w['date'])
+        d['profile']['weight'] = d['weights'][-1]['weight']
+        store.save(d)
+        return jsonify({'ok': True, 'action': 'weight',
+                        'message': f'Weigh-in logged: {lbs:g} lbs.'})
+
+    if action == 'supplement':
+        name = str(route.get('name', '')).strip() or 'Other'
+        time_of_day = str(route.get('time', 'Morning')).strip() or 'Morning'
+        d['supplements'].append({'date': date.today().isoformat(), 'name': name,
+                                 'time': time_of_day, 'taken': True})
+        store.save(d)
+        return jsonify({'ok': True, 'action': 'supplement',
+                        'message': f'{name} logged ({time_of_day}).'})
+
+    return _err(route.get('reason', "Didn't understand that — try 'log chicken and rice' "
+                "or 'weigh in at 200'."))
+
+
 @bp.post('/meals/ai/add')
 def ai_add_meals():
     body = request.get_json(force=True)
@@ -303,6 +394,7 @@ def briefing():
     context = json.dumps({
         'weekday': day_name,
         'planned_session': plan_day,
+        'readiness': stats.readiness(d),
         'yesterday_vitals': (vs.get('series') or [])[-1:] if vs.get('has_data') else [],
         'goals': {'protein_g': d['profile'].get('daily_protein_g'),
                   'calories': d['profile'].get('daily_calories'),

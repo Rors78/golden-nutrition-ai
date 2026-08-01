@@ -275,6 +275,35 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// ── voice logging: hold the coach's ear ─────────────────────────────────
+(function initVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const btn = document.getElementById('mic-btn');
+  if (!SR || !btn) return;
+  btn.hidden = false;
+  let rec = null;
+  btn.addEventListener('click', () => {
+    if (rec) { rec.stop(); return; }
+    rec = new SR();
+    rec.lang = 'en-US';
+    rec.interimResults = false;
+    btn.classList.add('listening');
+    toast('Listening — say what you ate, a weigh-in, or a supplement');
+    rec.onresult = async ev => {
+      const text = ev.results[0][0].transcript;
+      toast(`Heard: "${text}" — logging…`);
+      try {
+        const res = await api('POST', '/voice', { text });
+        toast(res.message);
+        await refresh();
+      } catch (e) { toast(e.message); }
+    };
+    rec.onerror = ev => { if (ev.error !== 'aborted') toast(`Mic: ${ev.error}`); };
+    rec.onend = () => { btn.classList.remove('listening'); rec = null; };
+    rec.start();
+  });
+})();
+
 // 3D machined-plate disc with embossed monogram — coach cards & badges
 export function plateDisc(text, { size = 44, tier = 'gold' } = {}) {
   const d = el(`<span class="plate-disc ${tier}" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.32)}px">${esc(text)}</span>`);
