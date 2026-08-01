@@ -15,7 +15,7 @@ from .supplement_kb import KB
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 
-EDITABLE_KINDS = ('meals', 'workouts', 'supplements', 'weights')
+EDITABLE_KINDS = ('meals', 'workouts', 'supplements', 'weights', 'vitals')
 
 
 def _err(message, status=400):
@@ -373,6 +373,8 @@ def save_settings():
         s['ntfy_server'] = str(body['ntfy_server']).strip() or 'https://ntfy.sh'
     if 'daily_steps' in body:
         s['daily_steps'] = clean_num(body['daily_steps']) or 8000
+    if 'sleep_target' in body:
+        s['sleep_target'] = clean_num(body['sleep_target'], float) or 7.5
     store.save(d)
     return jsonify({'ok': True, 'settings': s})
 
@@ -840,6 +842,15 @@ def update_entry(kind, idx):
         entries.sort(key=lambda w: w['date'])
         if entries:
             d['profile']['weight'] = entries[-1]['weight']
+    elif kind == 'vitals':
+        row = _normalize_vital(body)
+        merged = {**entries[idx], **row}
+        # blanking a field in the edit removes the reading entirely
+        for f, aliases in VITAL_ALIASES.items():
+            if any(str(body.get(a, 'x')) == '' for a in aliases):
+                merged.pop(f, None)
+        entries[idx] = merged
+        entries.sort(key=lambda v: v['date'])
     else:
         entries[idx] = {**entries[idx], **body}
     store.save(d)

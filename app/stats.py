@@ -309,10 +309,65 @@ def vitals_summary(data):
             bp = {'sys': v['bp_sys'], 'dia': v['bp_dia'], 'date': v['date'], 'level': level}
             break
 
+    latest_all = {f: latest(f) for f in VITAL_FIELDS}
+    avg7_all = {f: avg7(f) for f in ('steps', 'resting_hr', 'hrv_ms', 'sleep_h')}
+
+    # Deltas vs the 7-day average, tagged with which direction is good news
+    GOOD_UP = {'steps': True, 'resting_hr': False, 'hrv_ms': True, 'sleep_h': True}
+    deltas = {}
+    for f, up_good in GOOD_UP.items():
+        cur, avg = latest_all.get(f), avg7_all.get(f)
+        if cur is not None and avg not in (None, 0):
+            diff = round(cur['value'] - avg, 1)
+            deltas[f] = {'diff': diff,
+                         'good': (diff >= 0) == up_good if diff != 0 else True}
+
+    # Sleep debt vs target over the last 7 logged days
+    target = data.get('settings', {}).get('sleep_target', 7.5)
+    sleep_days = [v for v in recent if v.get('sleep_h') is not None]
+    sleep_debt = {'hours': round(sum(max(0, target - v['sleep_h']) for v in sleep_days), 1),
+                  'days': len(sleep_days), 'target': target} if sleep_days else None
+
+    # Early-warning signals: the classic overtraining / illness tells
+    signals = []
+
+    def tail_avg(field, n=3):
+        vals = [v[field] for v in vitals if v.get(field) is not None][-n:]
+        return sum(vals) / len(vals) if vals else None
+
+    def prior_avg(field, skip=3, span=7):
+        vals = [v[field] for v in vitals if v.get(field) is not None][:-skip][-span:]
+        return sum(vals) / len(vals) if vals else None
+
+    rhr_now, rhr_base = tail_avg('resting_hr'), prior_avg('resting_hr')
+    if rhr_now and rhr_base and rhr_now >= rhr_base + 3:
+        signals.append({'level': 'warn',
+                        'text': f"Resting heart rate is running ~{rhr_now - rhr_base:.0f} bpm above "
+                                f"your recent baseline ({rhr_now:.0f} vs {rhr_base:.0f}) — a classic "
+                                "early fatigue or oncoming-illness signal. Favor recovery and watch it."})
+    hrv_now, hrv_base = tail_avg('hrv_ms'), prior_avg('hrv_ms')
+    if hrv_now and hrv_base and hrv_now <= hrv_base * 0.85:
+        signals.append({'level': 'warn',
+                        'text': f"HRV is suppressed ~{(1 - hrv_now / hrv_base) * 100:.0f}% below your "
+                                f"recent baseline ({hrv_now:.0f} vs {hrv_base:.0f} ms) — the nervous "
+                                "system is asking for an easier day."})
+    if sleep_debt and sleep_debt['hours'] >= 5:
+        signals.append({'level': 'warn',
+                        'text': f"You're carrying {sleep_debt['hours']}h of sleep debt over the last "
+                                f"{sleep_debt['days']} logged nights (target {target}h) — recovery, "
+                                "appetite control, and lifts all pay for that."})
+    week_dates = {(date.today() - timedelta(days=i)).isoformat() for i in range(7)}
+    if len({v['date'] for v in vitals} & week_dates) == 7:
+        signals.append({'level': 'good',
+                        'text': 'Vitals logged all 7 days this week — the trends you see here are real.'})
+
     return {
         'has_data': True,
-        'latest': {f: latest(f) for f in VITAL_FIELDS},
-        'avg7': {f: avg7(f) for f in ('steps', 'resting_hr', 'hrv_ms', 'sleep_h')},
+        'latest': latest_all,
+        'avg7': avg7_all,
+        'deltas': deltas,
+        'sleep_debt': sleep_debt,
+        'signals': signals,
         'bp': bp,
         'series': vitals,
         'steps_goal': data.get('settings', {}).get('daily_steps', 8000),

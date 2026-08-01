@@ -1,6 +1,10 @@
 // Vitals: wearable/manual body data — steps, heart, sleep, blood pressure —
-// with the webhook + notification setup that makes the coach ambient.
-import { el, esc, api, toast, refresh, metric, CHART } from '../app.js';
+// readiness breakdown, early-warning signals, and the device/notify setup.
+import { el, esc, api, toast, refresh, metric, rowActions, CHART } from '../app.js';
+
+const VITAL_FIELDS = ['steps', 'resting_hr', 'hrv_ms', 'sleep_h', 'bp_sys', 'bp_dia'];
+const FIELD_LABELS = { steps: 'Steps', resting_hr: 'RHR', hrv_ms: 'HRV',
+                       sleep_h: 'Sleep', bp_sys: 'Sys', bp_dia: 'Dia' };
 
 export function renderVitals(root, state) {
   const vs = state.stats.vitals;
@@ -39,16 +43,62 @@ export function renderVitals(root, state) {
   root.append(form);
 
   if (vs.has_data) {
-    // ── latest numbers ──
+    // ── readiness breakdown ──
+    const rd = state.stats.readiness;
+    if (rd?.has_data) {
+      const card = el(`<div class="card" style="margin-top:14px">
+        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+          <span class="plate-disc ${rd.score >= 80 ? '' : rd.score >= 60 ? 'steel' : rd.score >= 40 ? 'iron' : 'rust'}"
+            style="width:64px;height:64px;font-size:22px">${rd.score}</span>
+          <div style="flex:1;min-width:220px">
+            <p class="chart-title" style="margin:0">Readiness · ${esc(rd.level)} · ${esc(rd.date)}</p>
+            <p style="margin:4px 0 0;color:var(--ink-2);font-size:13px">${esc(rd.guidance)}</p>
+          </div>
+        </div>
+        <div class="rd-comps" style="display:grid;gap:8px;margin-top:14px"></div>
+      </div>`);
+      const comps = card.querySelector('.rd-comps');
+      const NAMES = { sleep: 'Sleep', hrv: 'HRV', resting_hr: 'Resting HR' };
+      const UNITS = { sleep: 'h', hrv: ' ms', resting_hr: ' bpm' };
+      for (const [key, c] of Object.entries(rd.components)) {
+        comps.append(el(`<div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-2);margin-bottom:4px">
+            <span>${NAMES[key] || key}</span>
+            <span style="font-family:var(--font-mono)">${c.value}${UNITS[key] || ''} vs baseline ${c.baseline}${UNITS[key] || ''} · ${c.score}</span>
+          </div>
+          <div style="height:6px;border-radius:3px;background:var(--card-2)">
+            <div style="height:6px;border-radius:3px;width:${c.score}%;background:${c.score >= 80 ? 'var(--good)' : c.score >= 60 ? 'var(--gold)' : 'var(--warn)'}"></div>
+          </div></div>`));
+      }
+      root.append(card);
+    }
+
+    // ── early-warning signals ──
+    for (const s of vs.signals || []) {
+      root.append(el(`<div class="callout ${s.level === 'good' ? 'good' : 'warn'}" style="margin-top:10px">${esc(s.text)}</div>`));
+    }
+
+    // ── latest numbers with trend deltas ──
     const L = vs.latest;
     const grid = el('<div class="cards metrics" style="margin-top:14px"></div>');
-    const add = (label, entry, opts = {}) => {
-      if (entry) grid.append(metric(label, entry.value, { ...opts, small: `${opts.small || ''}${opts.small ? ' · ' : ''}${entry.date}` }));
+    const add = (label, entry, field, opts = {}) => {
+      if (!entry) return;
+      const dl = vs.deltas?.[field];
+      const delta = dl && dl.diff !== 0
+        ? { cls: dl.good ? (dl.diff > 0 ? 'up-good' : 'down-good') : (dl.diff > 0 ? 'up-bad' : 'down-bad'),
+            text: `${dl.diff > 0 ? '+' : ''}${dl.diff} vs 7d avg` }
+        : null;
+      grid.append(metric(label, entry.value,
+        { ...opts, delta, small: `${opts.small || ''}${opts.small ? ' · ' : ''}${entry.date}` }));
     };
-    add('Steps', L.steps, { small: `goal ${vs.steps_goal}` });
-    add('Resting HR', L.resting_hr, { suffix: ' bpm' });
-    add('HRV', L.hrv_ms, { suffix: ' ms' });
-    add('Sleep', L.sleep_h, { suffix: ' h' });
+    add('Steps', L.steps, 'steps', { small: `goal ${vs.steps_goal}` });
+    add('Resting HR', L.resting_hr, 'resting_hr', { suffix: ' bpm' });
+    add('HRV', L.hrv_ms, 'hrv_ms', { suffix: ' ms' });
+    add('Sleep', L.sleep_h, 'sleep_h', { suffix: ' h' });
+    if (vs.sleep_debt) {
+      grid.append(metric('Sleep debt', vs.sleep_debt.hours,
+        { suffix: 'h', small: `${vs.sleep_debt.days} nights vs ${vs.sleep_debt.target}h` }));
+    }
     if (vs.bp) grid.append(metric('Blood pressure', `${vs.bp.sys}/${vs.bp.dia}`, { small: vs.bp.date }));
     root.append(grid);
 
@@ -108,6 +158,37 @@ export function renderVitals(root, state) {
            mode: 'lines+markers', line: { color: CHART.steel, width: 2 }, marker: { size: 6 },
            hovertemplate: '%{x}<br>%{y} mmHg<extra>diastolic</extra>' }]);
     }
+    // ── history, editable ──
+    root.append(el('<p class="chart-title" style="margin:18px 0 8px">History · last 14 days</p>'));
+    const indexed = state.vitals.map((v, idx) => ({ v, idx })).slice(-14).reverse();
+    const wrap = el(`<div class="table-wrap"><table>
+      <thead><tr><th>Date</th>${VITAL_FIELDS.map(f => `<th class="num">${FIELD_LABELS[f]}</th>`).join('')}<th></th></tr></thead>
+      <tbody></tbody></table></div>`);
+    const tbody = wrap.querySelector('tbody');
+    for (const { v, idx } of indexed) {
+      const tr = el(`<tr><td>${esc(v.date)}</td>${VITAL_FIELDS.map(f =>
+        `<td class="num">${v[f] ?? '—'}</td>`).join('')}</tr>`);
+      tr.append(rowActions('vitals', idx, { onEdit: () => editRow(tr, v, idx) }));
+      tbody.append(tr);
+    }
+    root.append(wrap);
+
+    function editRow(tr, v, idx) {
+      tr.classList.add('editing');
+      tr.innerHTML = `<td><input type="date" value="${esc(v.date)}"></td>
+        ${VITAL_FIELDS.map(f => `<td><input type="number" step="0.1" value="${v[f] ?? ''}" data-f="${f}"></td>`).join('')}
+        <td class="row-actions"><button class="icon-btn" title="Save">✓</button><button class="icon-btn danger" title="Cancel">↩</button></td>`;
+      tr.querySelector('.icon-btn').addEventListener('click', async () => {
+        const body = { date: tr.querySelector('input[type=date]').value };
+        tr.querySelectorAll('input[data-f]').forEach(inp => { body[inp.dataset.f] = inp.value; });
+        try {
+          await api('PUT', `/entry/vitals/${idx}`, body);
+          toast('Saved');
+          await refresh();
+        } catch (e) { toast(e.message); }
+      });
+      tr.querySelector('.danger').addEventListener('click', () => refresh());
+    }
   } else {
     root.append(el('<div class="empty" style="margin-top:14px">No vitals yet. Log a day above, or wire up your watch below — either works.</div>'));
   }
@@ -134,6 +215,8 @@ export function renderVitals(root, state) {
         value="${esc(settings.ntfy_topic || '')}" placeholder="golden-nutrition-x7k2p9"></label>
       <label>Daily step goal <input name="daily_steps" type="number" min="0"
         value="${esc(settings.daily_steps || 8000)}"></label>
+      <label>Sleep target (h) <input name="sleep_target" type="number" min="4" max="12" step="0.5"
+        value="${esc(settings.sleep_target || 7.5)}"></label>
       <button class="gold-btn" type="submit" style="flex:0 1 auto">Save</button>
       <button class="ghost-btn test-push" type="button" style="flex:0 1 auto">Send test push</button>
     </form>

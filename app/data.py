@@ -29,7 +29,8 @@ DEFAULT_DATA = {
         'ntfy_server': 'https://ntfy.sh',
         'ntfy_topic': '',
         'ingest_token': '',
-        'daily_steps': 8000
+        'daily_steps': 8000,
+        'sleep_target': 7.5
     }
 }
 
