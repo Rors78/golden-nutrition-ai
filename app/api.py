@@ -100,6 +100,7 @@ def get_state():
             'readiness': stats.readiness(d),
             'achievements': stats.achievements(d),
             'plan_progress': stats.plan_progress(d),
+            'dashboard': stats.dashboard_extras(d),
         },
         'ai_backend': ai.backend_name(),
         'recovery_note': note,

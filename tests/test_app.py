@@ -446,6 +446,37 @@ def test_weekly_review_archived(client, monkeypatch):
     assert "showing up" in reviews[0]["summary"]
 
 
+def test_dashboard_command_center(client, monkeypatch):
+    dash = client.get("/api/state").get_json()["stats"]["dashboard"]
+    # empty data: 7-day grid exists, streaks zeroed, briefing action offered
+    assert len(dash["week_grid"]) == 7
+    assert sum(1 for d in dash["week_grid"] if d["is_today"]) == 1
+    assert dash["streaks"] == {"meals": 0, "weights": 0, "vitals": 0, "workout_weeks": 0}
+    assert any(a["id"] == "briefing" for a in dash["actions"])
+    assert len(dash["actions"]) <= 2
+
+    # log things today → grid reflects them, streaks tick
+    today = date.today().isoformat()
+    client.post("/api/meals", json={"name": "Big meal", "protein": 150, "calories": 900})
+    client.post("/api/weights", json={"date": today, "weight": 200})
+    client.post("/api/workouts", json={"date": today, "name": "Push", "duration": 60,
+                                       "exercises": []})
+    dash = client.get("/api/state").get_json()["stats"]["dashboard"]
+    today_cell = next(d for d in dash["week_grid"] if d["is_today"])
+    assert today_cell["workout"] == "done"
+    assert today_cell["protein_pct"] == 100
+    assert today_cell["weighed"] is True
+    assert dash["streaks"]["meals"] == 1 and dash["streaks"]["weights"] == 1
+
+    # a generated briefing clears the briefing action
+    from app import notify
+    monkeypatch.setattr(notify, "push", lambda *a, **k: True)
+    monkeypatch.setattr(ai, "daily_briefing", lambda p, per, c: "Go lift.")
+    client.post("/api/briefing")
+    dash = client.get("/api/state").get_json()["stats"]["dashboard"]
+    assert not any(a["id"] == "briefing" for a in dash["actions"])
+
+
 def test_supplement_adherence(client):
     assert client.get("/api/state").get_json()["stats"]["adherence"] == {"has_schedule": False}
     client.post("/api/schedule", json={"name": "Creatine", "time": "Morning"})
