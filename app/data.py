@@ -25,6 +25,7 @@ DEFAULT_DATA = {
     'vitals': [],
     'shopping_list': [],
     'watches': [],
+    'remedy_cabinet': [],
     'settings': {
         'ntfy_server': 'https://ntfy.sh',
         'ntfy_topic': '',

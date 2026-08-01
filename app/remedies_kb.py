@@ -11,6 +11,7 @@ House rules: complementary, never alternative. Interactions are load-bearing.
 This is reference information, not medical advice — the UI says so, always.
 """
 import json
+from datetime import date
 from pathlib import Path
 
 REMEDIES_DIR = Path(__file__).parent / 'remedies'
@@ -96,6 +97,14 @@ def search_kb(query, limit=12):
             scored.append((score + r['evidence'] * 0.1, r))
     scored.sort(key=lambda x: -x[0])
     return [r for _, r in scored[:limit]]
+
+
+def remedy_of_day():
+    """Deterministic daily pick from the strong-evidence shelf (4★+)."""
+    strong = [r for r in load_kb() if r['evidence'] >= 4]
+    if not strong:
+        return None
+    return strong[date.today().toordinal() % len(strong)]
 
 
 def kb_stats():

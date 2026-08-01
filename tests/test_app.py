@@ -197,6 +197,34 @@ def test_dashboard_radar(client):
     assert len(radar) <= 4
 
 
+def test_remedy_cabinet(client):
+    # everything is locked until the key turns
+    assert client.post("/api/remedies/cabinet", json={"id": "x"}).status_code == 403
+    client.post("/api/remedies/unlock", json={"key": "golden"})
+
+    kb = client.get("/api/remedies").get_json()["remedies"]
+    rid = kb[0]["id"]
+    assert client.post("/api/remedies/cabinet", json={"id": "not-a-remedy"}).status_code == 404
+    r = client.post("/api/remedies/cabinet", json={"id": rid})
+    assert r.status_code == 200 and r.get_json()["cabinet"] == [rid]
+    # idempotent add
+    client.post("/api/remedies/cabinet", json={"id": rid})
+    assert client.get("/api/state").get_json()["remedy_cabinet"] == [rid]
+
+    assert client.delete(f"/api/remedies/cabinet/{rid}").status_code == 200
+    assert client.delete(f"/api/remedies/cabinet/{rid}").status_code == 404
+    assert client.get("/api/state").get_json()["remedy_cabinet"] == []
+
+
+def test_remedy_of_day(client):
+    assert client.get("/api/state").get_json()["remedy_of_day"] is None  # locked
+    client.post("/api/remedies/unlock", json={"key": "GOLDEN"})
+    rod1 = client.get("/api/state").get_json()["remedy_of_day"]
+    rod2 = client.get("/api/state").get_json()["remedy_of_day"]
+    assert rod1 is not None and rod1["evidence"] >= 4
+    assert rod1["id"] == rod2["id"]  # deterministic within a day
+
+
 def test_coach_fit(client):
     # empty profile -> maintaining
     fit = client.get("/api/state").get_json()["stats"]["coach_fit"]
