@@ -67,6 +67,18 @@ export function renderDashboard(root, state) {
     root.append(row);
   }
 
+  // Radar: cross-tab signals worth a glance
+  if (dash.radar?.length) {
+    const radar = el('<div style="display:grid;gap:6px;margin:0 0 10px"></div>');
+    for (const r of dash.radar) {
+      const line = el(`<button type="button" class="callout ${r.level === 'good' ? 'good' : 'warn'}"
+        style="text-align:left;cursor:pointer;width:100%;border:0;border-left:3px solid ${r.level === 'good' ? 'var(--good)' : 'var(--warn)'};color:var(--ink-2);font:inherit;font-size:12px;padding:8px 14px">${esc(r.text)}</button>`);
+      line.addEventListener('click', () => { location.hash = r.tab; });
+      radar.append(line);
+    }
+    root.append(radar);
+  }
+
   // Steps from the watch, if vitals are flowing
   const vsum = state.stats.vitals;
 
@@ -84,6 +96,19 @@ export function renderDashboard(root, state) {
     rdRing.querySelector('.ring-sub').textContent = `${rd.level} · ${rd.date}`;
     rings.append(rdRing);
     hero.append(el(`<p style="text-align:center;color:var(--ink-2);font-size:13px;margin:10px 0 0">${esc(rd.guidance)}</p>`));
+    const rSeries = (state.stats.readiness_series || []).slice(-14);
+    if (rSeries.length > 2) {
+      const spark = el('<div style="height:44px;max-width:420px;margin:6px auto 0"></div>');
+      hero.append(spark);
+      Plotly.newPlot(spark,
+        [{ x: rSeries.map(r => r.date), y: rSeries.map(r => r.score), mode: 'lines',
+           line: { color: CHART.gold, width: 2, shape: 'spline' },
+           hovertemplate: '%{x}<br>readiness %{y}<extra></extra>' }],
+        CHART.layout({ height: 44, margin: { l: 4, r: 4, t: 2, b: 2 },
+          xaxis: { visible: false, fixedrange: true },
+          yaxis: { visible: false, fixedrange: true, range: [0, 105] } }),
+        CHART.config);
+    }
   }
   root.append(hero);
 
@@ -118,8 +143,23 @@ export function renderDashboard(root, state) {
         </div></div>`));
     }
     const s = dash.streaks || {};
-    wk.querySelector('.wk-streaks').textContent =
-      `Streaks — meals ${s.meals}d · weigh-ins ${s.weights}d · vitals ${s.vitals}d · training weeks ${s.workout_weeks}`;
+    const chains = [
+      ['meals logged', s.meals, 'd'],
+      ['protein goal', state.stats.nutrition?.protein_streak, 'd'],
+      ['weigh-ins', state.stats.weight_extras?.streak, 'd'],
+      ['step goal', state.stats.step_stats?.has_goal ? state.stats.step_stats.streak : null, 'd'],
+      ['vitals', s.vitals, 'd'],
+      ['training', s.workout_weeks, 'wk'],
+    ].filter(([, v]) => v != null);
+    const strip = wk.querySelector('.wk-streaks');
+    strip.style.display = 'flex';
+    strip.style.flexWrap = 'wrap';
+    strip.style.gap = '6px';
+    strip.textContent = '';
+    for (const [label, val, unit] of chains) {
+      strip.append(el(`<span style="border:1px solid ${val > 0 ? 'var(--gold-dim)' : 'var(--line)'};border-radius:999px;padding:3px 10px;font-size:11px;
+        color:${val > 0 ? 'var(--gold-bright)' : 'var(--muted)'}">${esc(label)} <strong>${val}${unit}</strong></span>`));
+    }
     root.append(wk);
   }
 
@@ -137,6 +177,11 @@ export function renderDashboard(root, state) {
   }
   if (vsum?.has_data && vsum.latest.steps) {
     grid.append(metric('Steps', vsum.latest.steps.value, { small: `goal ${vsum.steps_goal}` }));
+  }
+  const lastPr = (state.stats.recent_prs || [])[0];
+  if (lastPr) {
+    grid.append(metric('Latest PR', lastPr.weight, { suffix: ' lbs',
+      small: `${lastPr.exercise} · ${lastPr.date.slice(5)}` }));
   }
   root.append(grid);
 

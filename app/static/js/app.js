@@ -28,7 +28,9 @@ const view = document.getElementById('view');
 export function el(html) {
   const t = document.createElement('template');
   t.innerHTML = html.trim();
-  return t.content.firstElementChild;
+  // Adopt into the main document: template content lives in an inert document,
+  // and Plotly refuses to render into nodes owned by it.
+  return document.adoptNode(t.content.firstElementChild);
 }
 
 export function esc(s) {

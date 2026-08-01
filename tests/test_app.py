@@ -168,6 +168,35 @@ def test_declining_weights_produce_no_prs(client):
     assert client.get("/api/state").get_json()["stats"]["recent_prs"] == []
 
 
+def test_dashboard_radar(client):
+    assert client.get("/api/state").get_json()["stats"]["dashboard"]["radar"] == []
+    # low supplement -> deals warn
+    client.post("/api/schedule", json={"name": "Fish Oil", "time": "Evening", "servings": 3})
+    # a watch at its best price with 2 points -> deals good
+    seed_watches = [{"item": "Whey", "created": "2026-07-01", "history": [
+        {"date": "2026-07-01", "price": 60}, {"date": "2026-07-15", "price": 52}]}]
+    # near milestone: 200 start, goal 185, current 190.5 -> 190 plate 0.5 away
+    days = [(date.today() - timedelta(days=n)).isoformat() for n in range(2)]
+    client.post("/api/weights", json={"date": days[1], "weight": 200})
+    client.post("/api/weights", json={"date": days[0], "weight": 190.5})
+    client.post("/api/profile", json={"weight": 190.5, "goal_weight": 185})
+    client.post("/api/schedule", json={"name": "Fish Oil", "time": "Evening", "servings": 3})
+    with open("nutrition_data.json") as f:
+        data = json.load(f)
+    data["watches"] = seed_watches
+    with open("nutrition_data.json", "w") as f:
+        json.dump(data, f)
+
+    radar = client.get("/api/state").get_json()["stats"]["dashboard"]["radar"]
+    by_tab = {}
+    for r in radar:
+        by_tab.setdefault(r["tab"], []).append(r)
+    deals = {r["level"] for r in by_tab["deals"]}
+    assert deals == {"warn", "good"}  # low stock + buy window
+    assert any("190 plate" in r["text"] for r in by_tab["weight"])
+    assert len(radar) <= 4
+
+
 def test_coach_fit(client):
     # empty profile -> maintaining
     fit = client.get("/api/state").get_json()["stats"]["coach_fit"]
