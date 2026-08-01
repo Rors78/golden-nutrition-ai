@@ -115,6 +115,59 @@ def test_meal_lifecycle(client):
     assert client.get("/api/state").get_json()["meals"] == []
 
 
+def _log_workout(client, day, exercises):
+    client.post("/api/workouts", json={"date": day, "time": "07:00",
+                                       "name": "Custom", "duration": 60,
+                                       "intensity": "Hard", "exercises": exercises})
+
+
+def test_muscle_balance_and_weekly_volume(client):
+    today = date.today().isoformat()
+    _log_workout(client, today, [
+        {"exercise": "Barbell Squat", "sets": 4, "reps": 10, "weight": 100},   # 4000 Legs
+        {"exercise": "Bench Press", "sets": 4, "reps": 10, "weight": 100},     # 4000 Chest
+        {"exercise": "Leg Extension", "sets": 2, "reps": 10, "weight": 100},   # 2000 Legs (not Arms)
+    ])
+    st = client.get("/api/state").get_json()["stats"]
+    groups = {g["group"]: g for g in st["muscle_balance"]["groups"]}
+    assert groups["Legs"]["volume"] == 6000 and groups["Legs"]["pct"] == 60
+    assert groups["Chest"]["volume"] == 4000 and groups["Chest"]["pct"] == 40
+    assert st["muscle_balance"]["warning"] is None
+    wv = st["weekly_volume"]
+    assert len(wv) == 8
+    assert wv[-1]["volume"] == 10000 and wv[-1]["sessions"] == 1
+    assert wv[0]["volume"] == 0
+
+    # a chest-only log two days later should trip the legs warning… if legs fell under 15%
+    _log_workout(client, today, [
+        {"exercise": "Cable Fly", "sets": 10, "reps": 10, "weight": 400}])
+    mb = client.get("/api/state").get_json()["stats"]["muscle_balance"]
+    legs_pct = next(g["pct"] for g in mb["groups"] if g["group"] == "Legs")
+    assert legs_pct < 15 and "leg" in mb["warning"].lower()
+
+
+def test_recent_prs_and_e1rm(client):
+    d = [(date.today() - timedelta(days=n)).isoformat() for n in range(4)]
+    _log_workout(client, d[3], [{"exercise": "Deadlift", "sets": 3, "reps": 5, "weight": 200}])
+    _log_workout(client, d[2], [{"exercise": "Deadlift", "sets": 3, "reps": 5, "weight": 210}])
+    _log_workout(client, d[1], [{"exercise": "Deadlift", "sets": 3, "reps": 5, "weight": 205}])
+    _log_workout(client, d[0], [{"exercise": "Deadlift", "sets": 3, "reps": 5, "weight": 220}])
+    st = client.get("/api/state").get_json()["stats"]
+    # first session is baseline, 210 and 220 are PRs, 205 is not; newest first
+    assert [(p["weight"], p["prev"]) for p in st["recent_prs"]] == [(220, 210), (210, 200)]
+    assert st["recent_prs"][0]["exercise"] == "Deadlift"
+    # Epley e1RM on the best day: 220 * (1 + 5/30)
+    e1rms = [s["e1rm"] for s in st["progression"]["Deadlift"]]
+    assert max(e1rms) == round(220 * (1 + 5 / 30), 1)
+
+
+def test_declining_weights_produce_no_prs(client):
+    d = [(date.today() - timedelta(days=n)).isoformat() for n in range(3)]
+    for day, wt in zip(reversed(d), [150, 140, 130]):
+        _log_workout(client, day, [{"exercise": "Row", "sets": 3, "reps": 8, "weight": wt}])
+    assert client.get("/api/state").get_json()["stats"]["recent_prs"] == []
+
+
 def test_nutrition_trend(client):
     today = date.today().isoformat()
     yday = (date.today() - timedelta(days=1)).isoformat()

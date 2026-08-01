@@ -165,13 +165,108 @@ def progression(data):
             name = ex.get('exercise')
             if not name:
                 continue
-            day = out.setdefault(name, {}).setdefault(w['date'], {'top': 0.0, 'volume': 0.0})
+            day = out.setdefault(name, {}).setdefault(w['date'], {'top': 0.0, 'volume': 0.0, 'e1rm': 0.0})
             day['top'] = max(day['top'], ex.get('weight', 0))
             day['volume'] += ex.get('sets', 0) * ex.get('reps', 0) * ex.get('weight', 0)
+            # Epley estimated 1RM from the heaviest set: w * (1 + reps/30)
+            wt, reps = ex.get('weight', 0), ex.get('reps', 0)
+            if wt and reps:
+                day['e1rm'] = max(day['e1rm'], round(wt * (1 + reps / 30), 1))
     return {
         name: [{'date': d, **v} for d, v in sorted(days.items())]
         for name, days in out.items()
     }
+
+
+# First matching group wins — order matters (leg extension vs tricep extension,
+# overhead press vs bench press). Keyword matching is imperfect by design.
+MUSCLE_GROUPS = (
+    ('Core', ('plank', 'crunch', 'ab ', 'abs', 'sit-up', 'situp', 'oblique', 'russian')),
+    ('Legs', ('squat', 'leg', 'lunge', 'rdl', 'hamstring', 'calf', 'quad',
+              'glute', 'hip thrust', 'adductor', 'abductor')),
+    ('Back', ('row', 'pulldown', 'pull-up', 'pullup', 'chin', 'deadlift',
+              'shrug', 'lat ', 'lats', 'back')),
+    ('Shoulders', ('shoulder', 'overhead', 'ohp', 'lateral', 'delt', 'military',
+                   'arnold', 'face pull', 'rear', 'upright')),
+    ('Chest', ('bench', 'chest', 'fly', 'flye', 'dip', 'push-up', 'pushup',
+               'press')),
+    ('Arms', ('curl', 'tricep', 'bicep', 'pushdown', 'skull', 'hammer',
+              'extension', 'preacher', 'kickback')),
+)
+
+
+def _muscle_group(name):
+    low = f' {name.lower()} '
+    for group, keys in MUSCLE_GROUPS:
+        if any(k in low for k in keys):
+            return group
+    return 'Other'
+
+
+def muscle_balance(data, days=28):
+    """Volume share per muscle group over the window — spots the skipped legs."""
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    vols = {}
+    for w in data['workouts']:
+        if w['date'] < cutoff:
+            continue
+        for ex in w.get('exercises', []):
+            if not ex.get('exercise'):
+                continue
+            vol = ex.get('sets', 0) * ex.get('reps', 0) * ex.get('weight', 0)
+            if vol > 0:
+                g = _muscle_group(ex['exercise'])
+                vols[g] = vols.get(g, 0) + vol
+    total = sum(vols.values())
+    groups = [{'group': g, 'volume': round(v), 'pct': round(v / total * 100)}
+              for g, v in sorted(vols.items(), key=lambda kv: -kv[1])]
+    warning = None
+    if total > 0:
+        legs = next((g['pct'] for g in groups if g['group'] == 'Legs'), 0)
+        if legs < 15:
+            warning = (f"Legs are only {legs}% of your last-{days}-day volume — "
+                       "Cutler built his legacy on leg day.")
+    return {'groups': groups, 'days': days, 'warning': warning}
+
+
+def recent_prs(data, limit=8):
+    """All-time top-weight PRs, chronologically detected. A first session
+    establishes the baseline — it is never itself a PR."""
+    best = {}
+    prs = []
+    days = {}
+    for w in sorted(data['workouts'], key=lambda w: w['date']):
+        for ex in w.get('exercises', []):
+            name, wt = ex.get('exercise'), ex.get('weight', 0)
+            if name and wt > 0:
+                days.setdefault(w['date'], {}).setdefault(name, 0)
+                days[w['date']][name] = max(days[w['date']][name], wt)
+    for day in sorted(days):
+        for name, wt in days[day].items():
+            prev = best.get(name)
+            if prev is not None and wt > prev:
+                prs.append({'date': day, 'exercise': name,
+                            'weight': wt, 'prev': prev})
+            if prev is None or wt > prev:
+                best[name] = wt
+    return prs[-limit:][::-1]
+
+
+def weekly_volume(data, weeks=8):
+    """Per-week training volume + session count, oldest first."""
+    out = []
+    for i in range(weeks - 1, -1, -1):
+        start = date.today() - timedelta(days=7 * (i + 1) - 1)
+        end = date.today() - timedelta(days=7 * i)
+        vol, sessions = 0.0, 0
+        for w in data['workouts']:
+            if start.isoformat() <= w['date'] <= end.isoformat():
+                sessions += 1
+                for ex in w.get('exercises', []):
+                    vol += ex.get('sets', 0) * ex.get('reps', 0) * ex.get('weight', 0)
+        out.append({'week_start': start.isoformat(), 'volume': round(vol),
+                    'sessions': sessions})
+    return out
 
 
 def training_summary(data):
