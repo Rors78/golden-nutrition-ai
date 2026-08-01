@@ -6,6 +6,7 @@ from datetime import date, datetime
 from flask import Blueprint, jsonify, request, Response
 
 from . import ai, data as store, stats
+from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
 from .data import clean_num
 
 bp = Blueprint('api', __name__, url_prefix='/api')
@@ -29,6 +30,9 @@ def get_state():
         'schedule': d['supplement_schedule'],
         'weights': sorted(d['weights'], key=lambda w: w['date']),
         'deals': d.get('deals'),
+        'coaches': ROSTER,
+        'coach': d['profile'].get('coach', DEFAULT_COACH),
+        'plan': d.get('plan'),
         'stats': {
             'today': stats.today_summary(d),
             'weight': stats.weight_stats(d),
@@ -52,9 +56,41 @@ def save_profile():
         'goal_weight': clean_num(body.get('goal_weight'), float),
         'daily_protein_g': clean_num(body.get('daily_protein_g')),
         'daily_calories': clean_num(body.get('daily_calories')),
+        'coach': d['profile'].get('coach', DEFAULT_COACH),
     }
     store.save(d)
     return jsonify({'ok': True})
+
+
+@bp.post('/coach/select')
+def select_coach():
+    body = request.get_json(force=True)
+    coach_id = str(body.get('id', ''))
+    if coach_id not in {c['id'] for c in ROSTER}:
+        return _err('Unknown coach.', 404)
+    d = store.load()
+    d['profile']['coach'] = coach_id
+    store.save(d)
+    return jsonify({'ok': True, 'coach': coach_id})
+
+
+@bp.post('/plan')
+def weekly_plan():
+    d = store.load()
+    coach = get_coach(d['profile'].get('coach', DEFAULT_COACH))
+    ins = stats.insights(d)
+    context = ''
+    if ins.get('has_data'):
+        context = (f"averaging {ins['avg_daily_protein']}g protein/day over "
+                   f"{ins['days_logged']} logged days, {ins['workout_count']} workouts this week")
+    try:
+        plan = ai.weekly_plan(d['profile'], persona_prompt(coach), context)
+    except Exception as e:
+        return _err(e, 502)
+    d['plan'] = {'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                 'coach': coach['id'], 'plan': plan}
+    store.save(d)
+    return jsonify(d['plan'])
 
 
 def _normalize_meal(m):
@@ -242,8 +278,10 @@ def coach():
     }
     if not week_data['meals'] and not week_data['workouts']:
         return _err("Log some meals or workouts first — there's nothing from the last 7 days to review.")
+    coach = get_coach(d['profile'].get('coach', DEFAULT_COACH))
     try:
-        return jsonify({'summary': ai.coaching_summary(week_data)})
+        return jsonify({'summary': ai.coaching_summary(week_data, persona_prompt(coach)),
+                        'coach': coach['id']})
     except Exception as e:
         return _err(e, 502)
 

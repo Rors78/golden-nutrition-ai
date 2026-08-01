@@ -154,6 +154,62 @@ def test_deals_endpoint(client, monkeypatch):
     assert client.get("/api/state").get_json()["deals"]["results"] == fake
 
 
+def test_coach_roster_and_selection(client):
+    state = client.get("/api/state").get_json()
+    assert len(state["coaches"]) == 10
+    assert state["coach"] == "cutler"
+    ids = {c["id"] for c in state["coaches"]}
+    assert {"cutler", "arnold", "hall", "jetli", "goggins",
+            "bolt", "wicks", "austin", "simmons", "adriene"} == ids
+
+    assert client.post("/api/coach/select", json={"id": "goggins"}).status_code == 200
+    assert client.get("/api/state").get_json()["coach"] == "goggins"
+    assert client.post("/api/coach/select", json={"id": "nope"}).status_code == 404
+
+    # saving the profile must not lose the selected coach
+    client.post("/api/profile", json={"name": "G", "daily_protein_g": 160})
+    assert client.get("/api/state").get_json()["coach"] == "goggins"
+
+
+def test_weekly_plan_uses_selected_persona(client, monkeypatch):
+    fake = {"week": [{"day": "Monday", "title": "Push", "focus": "Chest",
+                      "details": ["Bench 4x10"]}],
+            "meals": [{"meal": "Breakfast", "items": "Oats", "protein": 30, "calories": 400}],
+            "supplements": ["Creatine 5g"],
+            "coach_note": "Ain't nothin' but a peanut."}
+    captured = {}
+
+    def fake_plan(profile, persona, context=""):
+        captured["persona"] = persona
+        return fake
+    monkeypatch.setattr(ai, "weekly_plan", fake_plan)
+
+    r = client.post("/api/plan")
+    assert r.status_code == 200
+    assert r.get_json()["plan"] == fake
+    assert "Jay Cutler" in captured["persona"]          # default coach
+    assert "never claim" in captured["persona"]          # inspired-by framing
+    assert "Safety guardrails" in captured["persona"]    # caveats injected
+    # cached for the next state load
+    assert client.get("/api/state").get_json()["plan"]["plan"] == fake
+
+
+def test_coach_summary_uses_selected_persona(client, monkeypatch):
+    client.post("/api/meals", json={"name": "Rice", "protein": 10, "calories": 200})
+    client.post("/api/coach/select", json={"id": "simmons"})
+    captured = {}
+
+    def fake_summary(week_data, persona=None):
+        captured["persona"] = persona
+        return "**What went well**: everything, darling!"
+    monkeypatch.setattr(ai, "coaching_summary", fake_summary)
+
+    r = client.post("/api/coach")
+    assert r.status_code == 200
+    assert r.get_json()["coach"] == "simmons"
+    assert "Richard Simmons" in captured["persona"]
+
+
 def test_corrupt_file_recovery(client, tmp_path):
     (tmp_path / "nutrition_data.json").write_text("{not json")
     state = client.get("/api/state").get_json()

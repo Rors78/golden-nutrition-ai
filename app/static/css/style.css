@@ -271,6 +271,49 @@ tr.editing input, tr.editing select { min-height: 36px; padding: 6px 8px; font-s
 .deal a { color: var(--steel); font-size: 12px; text-decoration: none; overflow-wrap: anywhere; }
 .deal a:hover { text-decoration: underline; }
 
+/* ── coach roster ── */
+.coach-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+}
+.coach-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; cursor: pointer; text-align: left; color: var(--ink);
+  font-family: var(--font-body); transition: border-color .15s, transform .12s, box-shadow .15s;
+}
+.coach-card:hover { border-color: var(--muted); transform: translateY(-2px); }
+.coach-card.selected {
+  border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold), 0 8px 24px rgba(242, 193, 78, .12);
+}
+.coach-card.selected::after { content: "YOUR COACH"; font-size: 9px; font-weight: 800;
+  letter-spacing: .12em; color: #14100a; background: var(--gold); border-radius: 999px;
+  padding: 3px 9px; margin-top: 8px; }
+.coach-emoji { font-size: 26px; }
+.coach-name { font-weight: 800; font-size: 15px; margin-top: 4px; }
+.coach-style { color: var(--gold-bright); font-size: 11px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; }
+.coach-goal { color: var(--steel); font-size: 12px; font-weight: 600; }
+.coach-vibe { color: var(--muted); font-size: 12px; line-height: 1.4; margin-top: 4px; }
+
+/* ── weekly plan ── */
+.plan-week {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+.plan-day {
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+.plan-day.rest { border-style: dashed; opacity: .85; }
+.plan-day-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.plan-dow { font-size: 10px; font-weight: 800; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted); }
+.plan-title { font-weight: 800; font-size: 14px; color: var(--gold-bright); }
+.plan-focus { color: var(--steel); font-size: 12px; font-weight: 600; margin: 2px 0 6px; }
+.plan-day ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+.plan-day li { margin: 3px 0; }
+
 /* ── coach / prose ── */
 .prose { line-height: 1.65; }
 .prose h1, .prose h2, .prose h3 {

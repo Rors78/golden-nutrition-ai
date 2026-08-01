@@ -224,22 +224,28 @@ def find_deals(items, location=""):
     return cleaned
 
 
-def coaching_summary(week_data):
-    """Weekly coaching write-up (markdown) from the last 7 days of data."""
+def coaching_summary(week_data, persona=None):
+    """Weekly coaching write-up (markdown) from the last 7 days of data.
+
+    `persona` is a system-prompt fragment (see coaches.persona_prompt) that
+    puts the review in the selected coach's voice and philosophy.
+    """
+    system = persona or COACH_PROMPT
     user_content = (
         "Here is my last 7 days of tracking data as JSON:\n\n"
         f"{json.dumps(week_data, indent=2)}\n\n"
-        "Give me a weekly coaching summary in markdown with three sections: "
-        "**What went well**, **What to fix**, and **The one change for next week** "
-        "(the single highest-impact adjustment)."
+        "Give me a weekly coaching summary in markdown, in your coaching voice, with "
+        "three sections: **What went well**, **What to fix**, and **The one change "
+        "for next week** (the single highest-impact adjustment). Keep it under 400 "
+        "words and use the actual numbers from the data."
     )
     if cli_available():
-        return _run_cli(f"{COACH_PROMPT}\n\n{user_content}", timeout=300)
+        return _run_cli(f"{system}\n\n{user_content}", timeout=300)
     if backend_name():
         response = _sdk_create(
             model=CLAUDE_MODEL,
             max_tokens=16000,
-            system=COACH_PROMPT,
+            system=system,
             messages=[{"role": "user", "content": user_content}],
         )
         if response.stop_reason == "refusal":
@@ -249,3 +255,88 @@ def coaching_summary(week_data):
         "No Claude backend found. Install Claude Code and log in (uses your "
         "Claude subscription), or set ANTHROPIC_API_KEY."
     )
+
+
+PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "week": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "day": {"type": "string"},
+                    "title": {"type": "string"},
+                    "focus": {"type": "string"},
+                    "details": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["day", "title", "focus", "details"],
+                "additionalProperties": False
+            }
+        },
+        "meals": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "meal": {"type": "string"},
+                    "items": {"type": "string"},
+                    "protein": {"type": "integer"},
+                    "calories": {"type": "integer"}
+                },
+                "required": ["meal", "items", "protein", "calories"],
+                "additionalProperties": False
+            }
+        },
+        "supplements": {"type": "array", "items": {"type": "string"}},
+        "coach_note": {"type": "string"}
+    },
+    "required": ["week", "meals", "supplements", "coach_note"],
+    "additionalProperties": False
+}
+
+
+def weekly_plan(profile, persona, context=""):
+    """Generate a 7-day plan (workouts, a sample meal day, supplements) in the
+    selected coach's style. Returns the parsed plan dict."""
+    ask = (
+        f"Build my training week.\n\n"
+        f"My profile: {json.dumps(profile)}\n"
+        + (f"Recent context: {context}\n" if context else "")
+        + "\nCreate:\n"
+        "1. A 7-day week (include rest/active-recovery days where your philosophy calls "
+        "for them): for each day give a short title, the focus, and 3-6 concrete detail "
+        "lines (exercises with sets×reps, or activity with duration/intensity).\n"
+        "2. One sample day of meals (4-6 meals) matching your nutrition philosophy AND "
+        "my daily protein/calorie goals — each with items, protein grams, calories.\n"
+        "3. Your supplement recommendations (respect your stance — fewer is fine).\n"
+        "4. A one-or-two-sentence coach_note in your voice.\n"
+    )
+    shape = (
+        "Respond with ONLY a JSON object — no markdown fences, no commentary — in exactly "
+        'this shape:\n{"week": [{"day": "Monday", "title": "...", "focus": "...", '
+        '"details": ["..."]}], "meals": [{"meal": "Breakfast", "items": "...", '
+        '"protein": 0, "calories": 0}], "supplements": ["..."], "coach_note": "..."}'
+    )
+    if cli_available():
+        plan = _extract_json(_run_cli(f"{persona}\n\n{ask}\n{shape}", timeout=420))
+    elif backend_name():
+        response = _sdk_create(
+            model=CLAUDE_MODEL,
+            max_tokens=16000,
+            system=persona,
+            messages=[{"role": "user", "content": ask}],
+            output_config={"format": {"type": "json_schema", "schema": PLAN_SCHEMA}},
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("Claude declined to process this request.")
+        plan = json.loads(next(b.text for b in response.content if b.type == "text"))
+    else:
+        raise AIUnavailable(
+            "No Claude backend found. Install Claude Code and log in (uses your "
+            "Claude subscription), or set ANTHROPIC_API_KEY."
+        )
+
+    if not plan.get("week"):
+        raise RuntimeError("The plan came back empty — try again.")
+    return plan

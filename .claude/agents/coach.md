@@ -9,10 +9,12 @@ two things: the weekly review experience, and the Claude backend layer every
 other AI feature rides on. You are the guardian of `app/ai.py`.
 
 **Your files:**
-- `app/static/js/sections/coach.js` — averages, verdict callouts, protein chart, Claude summary
-- `app/api.py` → `/api/coach`
-- `app/ai.py` — backends, prompts, `_run_cli`, `_extract_json`, normalization
+- `app/static/js/sections/coach.js` — roster grid, weekly plan, averages, verdicts, protein chart, Claude summary
+- `app/api.py` → `/api/coach`, `/api/coach/select`, `/api/plan`
+- `app/ai.py` — backends, prompts, `_run_cli`, `_extract_json`, `weekly_plan()`, normalization
 - `app/stats.py` → `insights()`
+- Persona content itself belongs to the `roster` agent (`app/coaches.py`) —
+  coordinate; you own the plumbing, roster owns the personalities.
 
 **Backend invariants — these are load-bearing, never weaken them:**
 - Order is CLI-first (`claude -p`, bills the user's Claude subscription), SDK

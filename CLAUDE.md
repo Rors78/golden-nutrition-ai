@@ -22,6 +22,7 @@ CI (GitHub Actions) runs pytest on every push and PR.
 | `app/__init__.py` | Flask app factory; serves the SPA at `/` |
 | `app/data.py` | storage: `nutrition_data.json`, atomic writes, corruption recovery |
 | `app/ai.py` | Claude backends: CLI-first (`claude -p`, subscription), SDK fallback |
+| `app/coaches.py` | the 10-coach roster: research-backed personas + `persona_prompt()` |
 | `app/stats.py` | computed stats: today totals, weight trend/ETA, insights, progression |
 | `app/api.py` | all `/api/*` JSON endpoints (one blueprint) |
 | `app/templates/index.html` | SPA shell: header, tabs, profile dialog |
@@ -56,5 +57,6 @@ must keep loading (defaults fill in — `test_legacy_v1_data_still_loads` guards
 
 One agent per app section lives in `.claude/agents/` — delegate section work to
 them (e.g. "have the meals agent add a barcode field"): `dashboard`, `weight`,
-`meals`, `workouts`, `supplements`, `deals`, `coach`, plus `design` (visual
-system) and `qa` (tests/CI). Each owns its section's JS module and API endpoints.
+`meals`, `workouts`, `supplements`, `deals`, `coach`, `roster` (the 10 coach
+personas), plus `design` (visual system) and `qa` (tests/CI). Each owns its
+section's JS module and API endpoints.
