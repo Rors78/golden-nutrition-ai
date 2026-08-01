@@ -1,0 +1,14 @@
+{
+  "name": "Golden Nutrition AI",
+  "short_name": "Golden",
+  "description": "Fitness & nutrition tracking with a 20-coach AI corner. The iron doesn't lie.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e1013",
+  "theme_color": "#0e1013",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

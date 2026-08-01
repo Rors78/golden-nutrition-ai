@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e1013">
+  <title>Golden Nutrition AI</title>
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><radialGradient id='g' cx='35%25' cy='30%25'><stop offset='0%25' stop-color='%23ffd875'/><stop offset='55%25' stop-color='%23f2c14e'/><stop offset='100%25' stop-color='%239c7a26'/></radialGradient></defs><circle cx='32' cy='32' r='30' fill='url(%23g)'/><circle cx='32' cy='32' r='20' fill='none' stroke='%239c7a26' stroke-width='3'/><circle cx='32' cy='32' r='7' fill='%230e1013'/></svg>">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="brand-plate" aria-hidden="true"><canvas id="brand-3d" width="104" height="104"></canvas></span>
+      <div>
+        <h1>Golden <em>Nutrition</em> AI</h1>
+        <p class="tagline">The iron doesn't lie. Neither does the log.</p>
+      </div>
+    </div>
+    <div class="top-right">
+      <span id="ai-badge" class="badge" hidden></span>
+      <button id="mic-btn" class="mic-btn" type="button" title="Voice log: say what you ate, a weigh-in, or a supplement" aria-label="Voice log" hidden>⏺</button>
+      <button id="profile-btn" class="ghost-btn" type="button">Profile</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button data-tab="dashboard" role="tab"><span class="tab-ico">▦</span>Dashboard</button>
+    <button data-tab="weight" role="tab"><span class="tab-ico">◔</span>Weight</button>
+    <button data-tab="vitals" role="tab"><span class="tab-ico">♥</span>Vitals</button>
+    <button data-tab="meals" role="tab"><span class="tab-ico">✚</span>Meals</button>
+    <button data-tab="workouts" role="tab"><span class="tab-ico">═</span>Workouts</button>
+    <button data-tab="supplements" role="tab"><span class="tab-ico">◉</span>Supps</button>
+    <button data-tab="deals" role="tab"><span class="tab-ico">◈</span>Deals</button>
+    <button data-tab="coach" role="tab"><span class="tab-ico">✦</span>Coach</button>
+  </nav>
+
+  <main id="view" tabindex="-1"></main>
+
+  <footer style="max-width:1180px;margin:0 auto;padding:8px clamp(16px,4vw,40px) 24px;color:var(--muted);font-size:12px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+    <span>Export CSV:</span>
+    <a href="/api/export/meals.csv" style="color:var(--steel)">meals</a>
+    <a href="/api/export/workouts.csv" style="color:var(--steel)">workouts</a>
+    <a href="/api/export/supplements.csv" style="color:var(--steel)">supplements</a>
+    <a href="/api/export/weights.csv" style="color:var(--steel)">weigh-ins</a>
+    <span style="margin-left:auto">Golden Nutrition AI — the iron doesn't lie</span>
+  </footer>
+
+  <dialog id="profile-dialog">
+    <form id="profile-form" method="dialog">
+      <h2 class="display">Profile</h2>
+      <label>Name <input name="name" type="text" autocomplete="name"></label>
+      <div class="grid-2">
+        <label>Age <input name="age" type="number" min="0" max="120"></label>
+        <label>Sex <select name="sex">
+          <option value="">Prefer not to say</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+          <option value="other">Other</option>
+        </select></label>
+        <label>Height (inches) <input name="height_in" type="number" min="0" max="100" placeholder="e.g., 70"></label>
+        <label>Current weight (lbs) <input name="weight" type="number" step="0.5" min="0"></label>
+        <label>Goal weight (lbs) <input name="goal_weight" type="number" step="0.5" min="0"></label>
+        <label>Daily protein goal (g) <input name="daily_protein_g" type="number" step="5" min="0"></label>
+        <label>Daily calorie goal <input name="daily_calories" type="number" step="50" min="0"></label>
+      </div>
+      <label>Health notes <input name="notes" type="text"
+        placeholder="e.g., bad knee, vegetarian, on blood-pressure meds — helps the AI personalize"></label>
+      <div class="dialog-actions">
+        <button type="button" class="ghost-btn" id="profile-cancel">Cancel</button>
+        <button type="submit" class="gold-btn">Save profile</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
