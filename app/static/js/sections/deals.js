@@ -53,4 +53,13 @@ export function renderDeals(root, state) {
     form.location.value = state.deals.location || '';
     showDeals(state.deals);
   }
+
+  // Hand-off from the Supps tab: "shop this stack" pre-fills the search
+  const prefill = sessionStorage.getItem('deals_prefill');
+  if (prefill) {
+    sessionStorage.removeItem('deals_prefill');
+    form.items.value = prefill;
+    toast('Stack loaded — hit Find deals when ready');
+    form.items.focus();
+  }
 }

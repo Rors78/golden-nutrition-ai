@@ -44,6 +44,7 @@ def get_state():
             'progression': stats.progression(d),
             'quick_meals': stats.quick_meals(d),
             'checklist': stats.checklist(d),
+            'adherence': stats.supplement_adherence(d),
         },
         'ai_backend': ai.backend_name(),
         'recovery_note': note,

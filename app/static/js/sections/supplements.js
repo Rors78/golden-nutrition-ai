@@ -97,6 +97,17 @@ export function renderSupplements(root, state) {
           `<div style="color:var(--muted);font-size:13px"><s style="color:var(--ink-2)">${esc(s.name)}</s> — ${esc(s.why)}</div>`).join('')}</div>`));
     }
     if (a.coach_note) advOut.append(el(`<div class="callout good" style="margin-top:12px">${esc(a.coach_note)}</div>`));
+
+    const worthBuying = a.recommendations
+      .filter(r => r.priority !== 'optional').map(r => r.name);
+    if (worthBuying.length) {
+      const shop = el(`<div style="margin-top:12px"><button class="gold-btn" type="button">Shop this stack in Deals</button></div>`);
+      shop.querySelector('button').addEventListener('click', () => {
+        sessionStorage.setItem('deals_prefill', worthBuying.join(', '));
+        location.hash = 'deals';
+      });
+      advOut.append(shop);
+    }
     if (a.safety_note) advOut.append(el(`<div class="callout warn" style="margin-top:8px">${esc(a.safety_note)}
       <span style="color:var(--muted)"> Not medical advice — check with a doctor or pharmacist, especially alongside medication.</span></div>`));
   }
@@ -184,6 +195,11 @@ export function renderSupplements(root, state) {
   const card = el('<div class="card"><p class="chart-title">Today\'s checklist</p></div>');
   if (checklist.length) {
     const done = checklist.filter(c => c.taken).length;
+    const adh = state.stats.adherence;
+    if (adh?.has_schedule) {
+      card.querySelector('.chart-title').insertAdjacentHTML('beforeend',
+        ` · <span style="color:${adh.pct >= 80 ? 'var(--good)' : adh.pct >= 50 ? 'var(--ink-2)' : 'var(--warn)'}">${adh.pct}% adherence, 7d</span>`);
+    }
     const list = el('<div class="check-list"></div>');
     for (const item of checklist) {
       const node = el(`<button type="button" class="check-item${item.taken ? ' done' : ''}">
@@ -199,6 +215,12 @@ export function renderSupplements(root, state) {
       list.append(node);
     }
     card.append(list, barbell('Stack completed', done, checklist.length, ''));
+    const shopStack = el(`<div style="margin-top:10px"><button class="ghost-btn" type="button">Find deals on my stack</button></div>`);
+    shopStack.querySelector('button').addEventListener('click', () => {
+      sessionStorage.setItem('deals_prefill', [...new Set(schedule.map(i => i.name))].join(', '));
+      location.hash = 'deals';
+    });
+    card.append(shopStack);
   } else {
     card.append(el('<div class="empty">No schedule yet — build your stack below and it shows up here every day.</div>'));
   }

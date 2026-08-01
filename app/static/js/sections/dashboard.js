@@ -1,4 +1,4 @@
-// Dashboard: hero progress rings, today's numbers, recent activity.
+// Dashboard: hero progress rings, today's plan, today's numbers, recent activity.
 import { el, esc, metric, ring } from '../app.js';
 
 export function renderDashboard(root, state) {
@@ -34,7 +34,47 @@ export function renderDashboard(root, state) {
     metric('Meals', t.meal_count, {}),
     metric('Workouts', t.workout_count, {}),
   );
+  const adh = state.stats.adherence;
+  if (adh?.has_schedule) {
+    grid.append(metric('Stack adherence', adh.pct, { suffix: '%', small: '7d' }));
+  }
   root.append(grid);
+
+  // Today's plan (from the coach-generated week) + coach strip
+  const coach = (state.coaches || []).find(c => c.id === state.coach);
+  const week = state.plan?.plan?.week || [];
+  const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  const planDay = week.find(d => (d.day || '').toLowerCase().includes(todayName.toLowerCase()));
+
+  if (planDay) {
+    const card = el(`<div class="card" style="margin-top:14px">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span class="plate-disc" style="width:38px;height:38px;font-size:12px">${esc((coach?.name || 'C').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase())}</span>
+        <div style="flex:1;min-width:200px">
+          <p class="chart-title" style="margin:0">Today's plan · ${esc(todayName)}</p>
+          <p style="margin:2px 0 0;font-weight:800;color:var(--gold-bright)">${esc(planDay.title)}
+            <span style="color:var(--steel);font-weight:600;font-size:13px"> — ${esc(planDay.focus)}</span></p>
+        </div>
+        <button class="ghost-btn" type="button" style="flex:0 1 auto">Full week</button>
+      </div>
+      <ul style="margin:10px 0 0;padding-left:20px;color:var(--ink-2);font-size:13px">
+        ${planDay.details.map(x => `<li style="margin:3px 0">${esc(x)}</li>`).join('')}
+      </ul>
+    </div>`);
+    card.querySelector('button').addEventListener('click', () => { location.hash = 'coach'; });
+    root.append(card);
+  } else if (coach) {
+    const strip = el(`<div class="card" style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="plate-disc" style="width:38px;height:38px;font-size:12px">${esc(coach.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase())}</span>
+      <div style="flex:1;min-width:200px">
+        <p class="chart-title" style="margin:0">Coached by ${esc(coach.name)} · ${esc(coach.style)}</p>
+        <p style="margin:2px 0 0;color:var(--ink-2);font-size:13px">${esc(coach.vibe)}</p>
+      </div>
+      <button class="ghost-btn" type="button" style="flex:0 1 auto">Build my week</button>
+    </div>`);
+    strip.querySelector('button').addEventListener('click', () => { location.hash = 'coach'; });
+    root.append(strip);
+  }
 
   const two = el('<div class="cards two" style="margin-top:14px"></div>');
 

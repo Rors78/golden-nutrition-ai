@@ -287,6 +287,16 @@ def test_schedule_accepts_custom_names(client):
         {"name": "Creatine Monohydrate", "time": "Morning"}]
 
 
+def test_supplement_adherence(client):
+    assert client.get("/api/state").get_json()["stats"]["adherence"] == {"has_schedule": False}
+    client.post("/api/schedule", json={"name": "Creatine", "time": "Morning"})
+    client.post("/api/checklist/toggle", json={"name": "Creatine", "time": "Morning"})
+    adh = client.get("/api/state").get_json()["stats"]["adherence"]
+    assert adh["has_schedule"] is True
+    assert adh["slots"] == 7 and adh["taken"] == 1
+    assert adh["pct"] == 14  # 1 of 7 daily slots this week
+
+
 def test_corrupt_file_recovery(client, tmp_path):
     (tmp_path / "nutrition_data.json").write_text("{not json")
     state = client.get("/api/state").get_json()

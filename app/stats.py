@@ -140,6 +140,24 @@ def quick_meals(data, limit=12):
     return out
 
 
+def supplement_adherence(data, days=7):
+    """% of scheduled supplement slots actually taken over the last `days`."""
+    schedule = data.get('supplement_schedule', [])
+    if not schedule:
+        return {'has_schedule': False}
+    taken = 0
+    slots = len(schedule) * days
+    for i in range(days):
+        day = (date.today() - timedelta(days=i)).isoformat()
+        for item in schedule:
+            if any(s['date'] == day and s['name'] == item['name']
+                   and s['time'] == item['time'] and s.get('taken')
+                   for s in data['supplements']):
+                taken += 1
+    return {'has_schedule': True, 'taken': taken, 'slots': slots,
+            'pct': round(taken / slots * 100) if slots else 0}
+
+
 def checklist(data):
     today = date.today().isoformat()
     items = []
