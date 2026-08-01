@@ -260,6 +260,38 @@ def quick_meals(data, limit=12):
     return out
 
 
+def nutrition_trend(data, days=14):
+    """Per-day macro totals vs goals, plus the protein-goal streak."""
+    prof = data['profile']
+    p_goal = prof.get('daily_protein_g') or 0
+    c_goal = prof.get('daily_calories') or 0
+    by_day = {}
+    for m in data['meals']:
+        t = by_day.setdefault(m['date'], {f: 0 for f in MACRO_FIELDS})
+        for f in MACRO_FIELDS:
+            t[f] += m.get(f, 0)
+    series = []
+    for i in range(days - 1, -1, -1):
+        day = (date.today() - timedelta(days=i)).isoformat()
+        t = by_day.get(day, {f: 0 for f in MACRO_FIELDS})
+        series.append({'date': day, **{f: round(t[f], 1) for f in MACRO_FIELDS}})
+    streak = 0
+    if p_goal:
+        day = date.today()
+        today_t = by_day.get(day.isoformat())
+        if not today_t or today_t['protein'] < p_goal:
+            day -= timedelta(days=1)  # today isn't over yet — it can't break a streak
+        while True:
+            t = by_day.get(day.isoformat())
+            if not t or t['protein'] < p_goal:
+                break
+            streak += 1
+            day -= timedelta(days=1)
+    hits = sum(1 for s in series if p_goal and s['protein'] >= p_goal)
+    return {'series': series, 'protein_goal': p_goal, 'calorie_goal': c_goal,
+            'protein_streak': streak, 'hit_days_14': hits}
+
+
 def supplement_adherence(data, days=7):
     """% of scheduled supplement slots actually taken over the last `days`."""
     schedule = data.get('supplement_schedule', [])

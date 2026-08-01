@@ -1,6 +1,6 @@
 // Meals: macros-left, AI quick log + suggestions, coach meal plan, quick add,
 // manual entry, editable history.
-import { el, esc, api, toast, refresh, metric, rowActions } from '../app.js';
+import { el, esc, api, toast, refresh, metric, rowActions, CHART } from '../app.js';
 
 const MACROS = ['protein', 'calories', 'carbs', 'fat', 'fiber'];
 
@@ -17,11 +17,15 @@ export function renderMeals(root, state) {
   const totals = state.stats.today.totals;
   const leftP = Math.max(0, (p.daily_protein_g || 0) - totals.protein);
   const leftC = Math.max(0, (p.daily_calories || 0) - totals.calories);
+  const nut = state.stats.nutrition || {};
+  const today = new Date().toISOString().slice(0, 10);
+  const feedings = state.meals.filter(m => m.date === today && (m.protein ?? 0) >= 25).length;
   const grid = el('<div class="cards metrics"></div>');
   grid.append(
     metric('Protein left', leftP, { suffix: 'g', small: `of ${p.daily_protein_g}g` }),
     metric('Calories left', leftC, { small: `of ${p.daily_calories}` }),
-    metric('Meals today', state.stats.today.meal_count, {}),
+    metric('Protein streak', nut.protein_streak ?? 0, { suffix: 'd', small: `${nut.hit_days_14 ?? 0}/14 days on target` }),
+    metric('Feedings ≥25g', feedings, { small: 'spread protein across the day' }),
   );
   root.append(grid);
 
@@ -41,6 +45,37 @@ export function renderMeals(root, state) {
         <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--muted);margin-right:6px"></span>Fat ${pct(fCal)}% · ${Math.round(fCal)} cal</span>
       </div>
     </div>`));
+  }
+
+  // ── 14-day trend: protein + calories vs goals ──
+  const series = nut.series || [];
+  if (series.some(s => s.protein > 0 || s.calories > 0)) {
+    const trend = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Last 14 days vs your goals</p>
+      <div class="grid-2" style="margin-top:8px">
+        <div class="chart chart-p" style="min-height:170px"></div>
+        <div class="chart chart-c" style="min-height:170px"></div>
+      </div></div>`);
+    root.append(trend);
+    const dates = series.map(s => s.date);
+    const goalLine = goal => goal ? [{ type: 'line', xref: 'paper', x0: 0, x1: 1,
+      y0: goal, y1: goal, line: { color: 'rgba(242,193,78,.55)', width: 1, dash: 'dot' } }] : [];
+    Plotly.newPlot(trend.querySelector('.chart-p'),
+      [{ x: dates, y: series.map(s => s.protein), type: 'bar',
+         marker: { color: series.map(s => nut.protein_goal && s.protein >= nut.protein_goal ? '#f2c14e' : '#6e7683'), cornerradius: 3 },
+         hovertemplate: '%{x}<br>%{y}g protein<extra></extra>' }],
+      CHART.layout({ height: 170, bargap: .35, margin: { l: 40, r: 8, t: 22, b: 28 },
+        title: { text: `Protein (goal ${nut.protein_goal}g)`, font: { size: 11, color: '#8b93a1' }, x: 0 },
+        shapes: goalLine(nut.protein_goal) }),
+      CHART.config);
+    Plotly.newPlot(trend.querySelector('.chart-c'),
+      [{ x: dates, y: series.map(s => s.calories), type: 'bar',
+         marker: { color: '#6ea8d8', cornerradius: 3 },
+         hovertemplate: '%{x}<br>%{y} calories<extra></extra>' }],
+      CHART.layout({ height: 170, bargap: .35, margin: { l: 44, r: 8, t: 22, b: 28 },
+        title: { text: `Calories (target ${nut.calorie_goal})`, font: { size: 11, color: '#8b93a1' }, x: 0 },
+        shapes: goalLine(nut.calorie_goal) }),
+      CHART.config);
   }
 
   // ── AI quick log ──
@@ -247,21 +282,54 @@ export function renderMeals(root, state) {
   });
   root.append(manual);
 
-  // ── last 7 days, editable ──
-  root.append(el('<p class="chart-title" style="margin:18px 0 8px">Last 7 days</p>'));
+  // ── last 7 days, grouped by day, editable ──
+  const yday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+  const hasYday = state.meals.some(m => m.date === yday);
+  const histHead = el(`<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:18px 0 8px">
+    <p class="chart-title" style="margin:0">Last 7 days</p>
+    ${hasYday ? '<button class="ghost-btn" type="button" style="min-height:32px;padding:5px 12px;font-size:12px">Repeat yesterday</button>' : ''}
+  </div>`);
+  if (hasYday) {
+    histHead.querySelector('button').addEventListener('click', async () => {
+      try {
+        const { count } = await api('POST', '/meals/repeat-yesterday');
+        toast(`Logged yesterday's ${count} meal${count > 1 ? 's' : ''} again`);
+        await refresh();
+      } catch (e) { toast(e.message); }
+    });
+  }
+  root.append(histHead);
   const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
-  const rows = state.meals.map((m, idx) => ({ m, idx })).filter(({ m }) => m.date >= weekAgo).reverse();
+  const rows = state.meals.map((m, idx) => ({ m, idx }))
+    .filter(({ m }) => m.date >= weekAgo)
+    .sort((a, b) => (b.m.date + (b.m.time || '')).localeCompare(a.m.date + (a.m.time || '')));
   if (!rows.length) {
     root.append(el('<div class="empty">No meals in the last 7 days.</div>'));
     return;
   }
   const wrap = el(`<div class="table-wrap"><table>
-    <thead><tr><th>Date</th><th>Time</th><th>Meal</th>
+    <thead><tr><th>Time</th><th>Meal</th>
       <th class="num">P</th><th class="num">Cal</th><th class="num">C</th><th class="num">F</th><th class="num">Fib</th><th></th></tr></thead>
     <tbody></tbody></table></div>`);
   const tbody = wrap.querySelector('tbody');
+  const dayLabel = iso => iso === today ? 'Today' : iso === yday ? 'Yesterday'
+    : new Date(iso + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  let curDay = null;
   for (const { m, idx } of rows) {
-    const tr = el(`<tr><td>${esc(m.date)}</td><td>${esc(m.time)}</td><td title="${esc(m.notes || '')}">${esc(m.name)}</td>
+    if (m.date !== curDay) {
+      curDay = m.date;
+      const dayMeals = rows.filter(r => r.m.date === curDay).map(r => r.m);
+      const sum = f => Math.round(dayMeals.reduce((s, x) => s + (x[f] ?? 0), 0));
+      tbody.append(el(`<tr style="background:var(--bg)">
+        <td colspan="2" style="font-weight:800;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--steel)">${dayLabel(curDay)}</td>
+        <td class="num" style="color:var(--gold-bright);font-family:var(--font-mono);font-size:12px">${sum('protein')}g</td>
+        <td class="num" style="font-family:var(--font-mono);font-size:12px">${sum('calories')}</td>
+        <td class="num" style="color:var(--muted);font-family:var(--font-mono);font-size:12px">${sum('carbs')}</td>
+        <td class="num" style="color:var(--muted);font-family:var(--font-mono);font-size:12px">${sum('fat')}</td>
+        <td class="num" style="color:var(--muted);font-family:var(--font-mono);font-size:12px">${sum('fiber')}</td>
+        <td></td></tr>`));
+    }
+    const tr = el(`<tr><td>${esc(m.time)}</td><td title="${esc(m.notes || '')}">${esc(m.name)}</td>
       <td class="num">${m.protein ?? 0}</td><td class="num">${m.calories ?? 0}</td>
       <td class="num">${m.carbs ?? 0}</td><td class="num">${m.fat ?? 0}</td><td class="num">${m.fiber ?? 0}</td></tr>`);
     tr.append(rowActions('meals', idx, { onEdit: () => editRow(tr, m, idx) }));
@@ -271,8 +339,7 @@ export function renderMeals(root, state) {
 
   function editRow(tr, m, idx) {
     tr.classList.add('editing');
-    tr.innerHTML = `<td><input type="date" value="${esc(m.date)}"></td>
-      <td><input type="time" value="${esc(m.time)}"></td>
+    tr.innerHTML = `<td style="min-width:170px"><input type="date" value="${esc(m.date)}" style="width:120px"><input type="time" value="${esc(m.time)}" style="width:90px;margin-top:4px"></td>
       <td><input type="text" value="${esc(m.name)}"></td>
       ${MACROS.map(f => `<td><input type="number" min="0" value="${m[f] ?? 0}"></td>`).join('')}
       <td class="row-actions"><button class="icon-btn" title="Save">✓</button><button class="icon-btn danger" title="Cancel">↩</button></td>`;

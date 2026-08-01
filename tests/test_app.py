@@ -115,6 +115,44 @@ def test_meal_lifecycle(client):
     assert client.get("/api/state").get_json()["meals"] == []
 
 
+def test_nutrition_trend(client):
+    today = date.today().isoformat()
+    yday = (date.today() - timedelta(days=1)).isoformat()
+    # yesterday hit the 150g default goal; today hasn't (yet)
+    client.post("/api/meals", json={"name": "Big day", "date": yday,
+                                    "protein": 160, "calories": 1800})
+    client.post("/api/meals", json={"name": "Light lunch", "date": today,
+                                    "protein": 40, "calories": 500})
+    nut = client.get("/api/state").get_json()["stats"]["nutrition"]
+    assert len(nut["series"]) == 14
+    assert nut["series"][-1] == {"date": today, "protein": 40, "calories": 500,
+                                 "carbs": 0, "fat": 0, "fiber": 0}
+    assert nut["series"][-2]["protein"] == 160
+    assert nut["protein_goal"] == 150
+    # an unfinished today doesn't break the streak started yesterday
+    assert nut["protein_streak"] == 1
+    assert nut["hit_days_14"] == 1
+    # once today hits the goal it joins the streak
+    client.post("/api/meals", json={"name": "Steak", "date": today, "protein": 120})
+    nut = client.get("/api/state").get_json()["stats"]["nutrition"]
+    assert nut["protein_streak"] == 2
+    assert nut["hit_days_14"] == 2
+
+
+def test_repeat_yesterday(client):
+    assert client.post("/api/meals/repeat-yesterday").status_code == 400
+    yday = (date.today() - timedelta(days=1)).isoformat()
+    client.post("/api/meals", json={"name": "Chili", "date": yday,
+                                    "protein": 45, "calories": 600})
+    r = client.post("/api/meals/repeat-yesterday")
+    assert r.status_code == 200 and r.get_json()["count"] == 1
+    today_meals = [m for m in client.get("/api/state").get_json()["meals"]
+                   if m["date"] == date.today().isoformat()]
+    assert len(today_meals) == 1
+    assert today_meals[0]["name"] == "Chili" and today_meals[0]["protein"] == 45
+    assert today_meals[0]["notes"] == "Repeated from yesterday"
+
+
 def test_weight_replaces_same_day_and_syncs_profile(client):
     today = date.today().isoformat()
     client.post("/api/weights", json={"date": today, "weight": 201})

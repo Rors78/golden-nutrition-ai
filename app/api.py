@@ -3,7 +3,7 @@ import csv
 import io
 import json
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request, Response
 
@@ -93,6 +93,7 @@ def get_state():
             'insights': stats.insights(d),
             'progression': stats.progression(d),
             'quick_meals': stats.quick_meals(d),
+            'nutrition': stats.nutrition_trend(d),
             'checklist': stats.checklist(d),
             'adherence': stats.supplement_adherence(d),
             'adherence_series': stats.adherence_series(d),
@@ -182,6 +183,20 @@ def add_meal():
     d['meals'].append(meal)
     store.save(d)
     return jsonify({'ok': True})
+
+
+@bp.post('/meals/repeat-yesterday')
+def repeat_yesterday():
+    d = store.load()
+    yday = (date.today() - timedelta(days=1)).isoformat()
+    src = [m for m in d['meals'] if m['date'] == yday]
+    if not src:
+        return _err('No meals logged yesterday.')
+    today = date.today().isoformat()
+    for m in src:
+        d['meals'].append({**m, 'date': today, 'notes': 'Repeated from yesterday'})
+    store.save(d)
+    return jsonify({'ok': True, 'count': len(src)})
 
 
 @bp.post('/meals/ai/parse')
