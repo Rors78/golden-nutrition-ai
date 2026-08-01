@@ -217,6 +217,76 @@ def test_coach_summary_uses_selected_persona(client, monkeypatch):
     assert "Richard Simmons" in captured["persona"]
 
 
+def test_profile_stores_age_sex_notes(client):
+    client.post("/api/profile", json={"name": "G", "age": 44, "sex": "male",
+                                      "notes": "bad knee", "weight": 200,
+                                      "daily_protein_g": 150, "daily_calories": 2000})
+    p = client.get("/api/state").get_json()["profile"]
+    assert p["age"] == 44 and p["sex"] == "male" and p["notes"] == "bad knee"
+
+
+def test_supplement_advice_uses_profile_and_persona(client, monkeypatch):
+    client.post("/api/profile", json={"name": "G", "age": 44, "sex": "male",
+                                      "daily_protein_g": 150, "daily_calories": 2000})
+    client.post("/api/coach/select", json={"id": "nippard"})
+    client.post("/api/schedule", json={"name": "Creatine", "time": "Morning"})
+
+    fake = {"recommendations": [{"name": "Creatine Monohydrate", "dose": "5g",
+                                 "timing": "daily, any time", "priority": "essential",
+                                 "why": "strongest evidence base in sports nutrition"}],
+            "skip": [{"name": "BCAAs", "why": "redundant with adequate protein"}],
+            "coach_note": "The science says.",
+            "safety_note": "Check with your doctor."}
+    captured = {}
+
+    def fake_advice(profile, persona, context):
+        captured["profile"] = profile
+        captured["persona"] = persona
+        captured["context"] = context
+        return fake
+    monkeypatch.setattr(ai, "supplement_advice", fake_advice)
+
+    r = client.post("/api/supplements/advice")
+    assert r.status_code == 200
+    assert r.get_json()["advice"] == fake
+    assert captured["profile"]["age"] == 44 and captured["profile"]["sex"] == "male"
+    assert "Jeff Nippard" in captured["persona"]
+    assert "Creatine" in captured["context"]          # current stack included
+    assert "workouts_last_7d" in captured["context"]  # history included
+    # cached in state
+    assert client.get("/api/state").get_json()["supp_advice"]["advice"] == fake
+
+
+def test_supplement_kb_shape_and_verdicts(client):
+    from app.supplement_kb import KB, VERDICTS, kb_for_prompt
+    assert len(KB) == 34
+    ids = [s["id"] for s in KB]
+    assert len(ids) == len(set(ids)), "duplicate KB ids"
+    for s in KB:
+        assert s["verdict"] in VERDICTS, f"{s['id']} bad verdict"
+        for field in ("name", "category", "evidence_for", "dose", "timing",
+                      "pros", "cons", "best_for", "skip_if"):
+            assert s.get(field), f"{s['id']} missing {field}"
+    # the honest tiers exist and are populated
+    verdicts = {s["verdict"] for s in KB}
+    assert verdicts == set(VERDICTS)
+    garbage = {s["id"] for s in KB if s["verdict"] == "garbage"}
+    assert {"bcaa", "glutamine", "fat-burners", "test-boosters",
+            "greens-powder", "zma"} == garbage
+    # prompt grounding contains the verdict language
+    grounding = kb_for_prompt()
+    assert "GARBAGE" in grounding and "Creatine" in grounding
+    # served to the frontend
+    assert len(client.get("/api/state").get_json()["kb"]) == 34
+
+
+def test_schedule_accepts_custom_names(client):
+    r = client.post("/api/schedule", json={"name": "Creatine Monohydrate", "time": "Morning"})
+    assert r.status_code == 200
+    assert client.get("/api/state").get_json()["schedule"] == [
+        {"name": "Creatine Monohydrate", "time": "Morning"}]
+
+
 def test_corrupt_file_recovery(client, tmp_path):
     (tmp_path / "nutrition_data.json").write_text("{not json")
     state = client.get("/api/state").get_json()

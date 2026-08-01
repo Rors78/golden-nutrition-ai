@@ -11,7 +11,7 @@ export function renderDashboard(root, state) {
   if (p.weight && p.goal_weight) {
     const diff = p.weight - p.goal_weight;
     const line = diff === 0
-      ? `Weight ${p.weight} lbs — at goal 🎯`
+      ? `Weight ${p.weight} lbs — at goal`
       : `Weight ${p.weight} lbs → goal ${p.goal_weight} lbs (${Math.abs(diff).toFixed(1)} lbs ${diff > 0 ? 'to lose' : 'to gain'})`;
     root.append(el(`<p class="section-sub">${esc(line)}${w.eta ? ` · on pace for ${esc(w.eta)}` : ''}</p>`));
   } else {

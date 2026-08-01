@@ -48,7 +48,7 @@ export function renderMeals(root, state) {
       <p style="color:var(--ink-2);font-size:13px;margin:10px 0">Total: <strong style="color:var(--gold-bright)">${totalP}g protein, ${totalC} calories</strong></p>
       <div class="form-row">
         <button class="gold-btn add-all" type="button">Add all to log</button>
-        <button class="ghost-btn discard" type="button">Discard</button>
+        <button class="ghost-btn discard" type="button">Discard estimate</button>
       </div></div>`);
     wrap.querySelector('.add-all').addEventListener('click', async () => {
       try {

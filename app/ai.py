@@ -14,6 +14,7 @@ import tempfile
 import anthropic
 
 from .data import clean_num
+from .supplement_kb import kb_for_prompt
 
 CLAUDE_MODEL = "claude-opus-5"
 
@@ -222,6 +223,109 @@ def find_deals(items, location=""):
     if not cleaned:
         raise RuntimeError("No verifiable deals came back — try naming the items more specifically.")
     return cleaned
+
+
+SUPP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "recommendations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "dose": {"type": "string"},
+                    "timing": {"type": "string"},
+                    "priority": {"type": "string", "enum": ["essential", "beneficial", "optional"]},
+                    "why": {"type": "string"}
+                },
+                "required": ["name", "dose", "timing", "priority", "why"],
+                "additionalProperties": False
+            }
+        },
+        "skip": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "why": {"type": "string"}
+                },
+                "required": ["name", "why"],
+                "additionalProperties": False
+            }
+        },
+        "coach_note": {"type": "string"},
+        "safety_note": {"type": "string"}
+    },
+    "required": ["recommendations", "skip", "coach_note", "safety_note"],
+    "additionalProperties": False
+}
+
+
+def supplement_advice(profile, persona, context):
+    """Personalized supplement stack: profile factors + logged history + coach stance."""
+    ask = (
+        "Recommend my optimal supplement stack.\n\n"
+        f"My profile: {json.dumps(profile)}\n"
+        f"My current stack, adherence, and recent training/diet data: {context}\n\n"
+        "GROUND every recommendation in this evidence table (verdicts: PROVEN = the real "
+        "ones; SOLID = worth it for the right training; SITUATIONAL = only if the user "
+        "specifically needs it; WEAK = thin evidence; GARBAGE = marketing in a tub). "
+        "Do not recommend anything the table grades WEAK or GARBAGE unless you explain "
+        "the narrow exception, and if the user's CURRENT stack contains WEAK or GARBAGE "
+        "items, say so plainly in your voice — people deserve to know what is a true "
+        "supplement and what is garbage:\n"
+        f"{kb_for_prompt()}\n\n"
+        "Weigh ALL the factors: age (e.g., vitamin D and creatine matter more with age; "
+        "40+ may benefit from joint support), sex (e.g., iron considerations for women, "
+        "typically not for men), body weight and goal direction (cutting vs gaining), "
+        "training volume and type from my actual logs, diet gaps visible in my macro "
+        "history (low fiber, protein shortfall), my health notes, and YOUR supplement "
+        "philosophy — if your stance is minimalist, recommend few things and say why "
+        "that's a feature. If age or sex are missing from my profile, say so in the "
+        "coach_note and generalize sensibly.\n\n"
+        "Return:\n"
+        "- recommendations: each with name, specific dose, timing, priority "
+        "(essential = clearly worth it for me; beneficial = solid support; optional = "
+        "nice-to-have), and why — tied to MY numbers and factors, not generic blurbs\n"
+        "- skip: supplements I might expect that YOU would skip, with the honest reason\n"
+        "- coach_note: one or two lines in your voice\n"
+        "- safety_note: interactions and medical-check reminders relevant to my profile\n"
+    )
+    shape = (
+        "Respond with ONLY a JSON object — no markdown fences, no commentary — in exactly "
+        'this shape:\n{"recommendations": [{"name": "...", "dose": "...", "timing": "...", '
+        '"priority": "essential|beneficial|optional", "why": "..."}], '
+        '"skip": [{"name": "...", "why": "..."}], "coach_note": "...", "safety_note": "..."}'
+    )
+    if cli_available():
+        advice = _extract_json(_run_cli(f"{persona}\n\n{ask}\n{shape}", timeout=300))
+    elif backend_name():
+        response = _sdk_create(
+            model=CLAUDE_MODEL,
+            max_tokens=16000,
+            system=persona,
+            messages=[{"role": "user", "content": ask}],
+            output_config={"format": {"type": "json_schema", "schema": SUPP_SCHEMA}},
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("Claude declined to process this request.")
+        advice = json.loads(next(b.text for b in response.content if b.type == "text"))
+    else:
+        raise AIUnavailable(
+            "No Claude backend found. Install Claude Code and log in (uses your "
+            "Claude subscription), or set ANTHROPIC_API_KEY."
+        )
+
+    if not advice.get("recommendations"):
+        raise RuntimeError("No recommendations came back — try again.")
+    valid = {"essential", "beneficial", "optional"}
+    for r in advice["recommendations"]:
+        if r.get("priority") not in valid:
+            r["priority"] = "optional"
+    advice.setdefault("skip", [])
+    return advice
 
 
 def coaching_summary(week_data, persona=None):

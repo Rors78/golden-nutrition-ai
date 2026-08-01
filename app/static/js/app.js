@@ -221,4 +221,57 @@ form.addEventListener('submit', async () => {
   catch (e) { toast(e.message); }
 });
 
+// ── 3D brand plate (Three.js) — a machined gold weight plate ────────────
+function initBrandPlate() {
+  const canvas = document.getElementById('brand-3d');
+  if (!canvas || typeof THREE === 'undefined') return;
+  try {
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(52, 52, false);
+    const scene = new THREE.Scene();
+    const cam = new THREE.PerspectiveCamera(32, 1, 0.1, 10);
+    cam.position.z = 3.4;
+
+    const gold = new THREE.MeshStandardMaterial({ color: 0xf2c14e, metalness: 0.85, roughness: 0.32 });
+    const goldBright = new THREE.MeshStandardMaterial({ color: 0xffd875, metalness: 0.9, roughness: 0.22 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x171a1f, metalness: 0.6, roughness: 0.5 });
+
+    const plate = new THREE.Group();
+    plate.add(new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.22, 64), gold));
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(1, 0.09, 20, 64), goldBright);
+    rim.rotation.x = Math.PI / 2;
+    plate.add(rim);
+    const groove = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.03, 12, 64), dark);
+    groove.rotation.x = Math.PI / 2;
+    groove.position.y = 0.11;
+    plate.add(groove);
+    plate.add(new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.3, 48), dark));
+    plate.rotation.x = 1.05;
+    scene.add(plate);
+
+    scene.add(new THREE.AmbientLight(0xfff6e0, 0.55));
+    const key = new THREE.DirectionalLight(0xfff2cc, 1.4);
+    key.position.set(2, 3, 4);
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0x6ea8d8, 0.35);
+    fill.position.set(-3, -1, 2);
+    scene.add(fill);
+
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    (function spin() {
+      plate.rotation.y += 0.012;
+      renderer.render(scene, cam);
+      if (!reduced) requestAnimationFrame(spin);
+    })();
+  } catch { /* WebGL unavailable — the CSS plate underneath still shows */ }
+}
+initBrandPlate();
+
+// 3D machined-plate disc with embossed monogram — coach cards & badges
+export function plateDisc(text, { size = 44, tier = 'gold' } = {}) {
+  const d = el(`<span class="plate-disc ${tier}" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.32)}px">${esc(text)}</span>`);
+  return d;
+}
+
 refresh().catch(e => { view.innerHTML = ''; view.append(el(`<div class="empty">Failed to load: ${esc(e.message)}</div>`)); });

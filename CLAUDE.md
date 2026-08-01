@@ -23,6 +23,7 @@ CI (GitHub Actions) runs pytest on every push and PR.
 | `app/data.py` | storage: `nutrition_data.json`, atomic writes, corruption recovery |
 | `app/ai.py` | Claude backends: CLI-first (`claude -p`, subscription), SDK fallback |
 | `app/coaches.py` | the 20-coach roster: research-backed personas + `persona_prompt()` |
+| `app/supplement_kb.py` | evidence-graded supplement knowledge base (proven→garbage tiers) |
 | `app/stats.py` | computed stats: today totals, weight trend/ETA, insights, progression |
 | `app/api.py` | all `/api/*` JSON endpoints (one blueprint) |
 | `app/templates/index.html` | SPA shell: header, tabs, profile dialog |

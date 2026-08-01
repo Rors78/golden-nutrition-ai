@@ -8,10 +8,13 @@ DATA_FILE = Path("nutrition_data.json")
 DEFAULT_DATA = {
     'profile': {
         'name': '',
+        'age': 0,
+        'sex': '',
         'weight': 0,
         'goal_weight': 0,
         'daily_protein_g': 150,
-        'daily_calories': 2000
+        'daily_calories': 2000,
+        'notes': ''
     },
     'meals': [],
     'workouts': [],
@@ -35,6 +38,8 @@ def load():
                 data = json.load(f)
             for key, default in DEFAULT_DATA.items():
                 data.setdefault(key, copy.deepcopy(default))
+            for key, default in DEFAULT_DATA['profile'].items():
+                data['profile'].setdefault(key, default)
             return data
         except (json.JSONDecodeError, OSError):
             backup = DATA_FILE.with_name(DATA_FILE.name + '.corrupt')

@@ -1,6 +1,7 @@
 """JSON API consumed by the single-page frontend."""
 import csv
 import io
+import json
 from datetime import date, datetime
 
 from flask import Blueprint, jsonify, request, Response
@@ -8,6 +9,7 @@ from flask import Blueprint, jsonify, request, Response
 from . import ai, data as store, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
 from .data import clean_num
+from .supplement_kb import KB
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -30,6 +32,8 @@ def get_state():
         'schedule': d['supplement_schedule'],
         'weights': sorted(d['weights'], key=lambda w: w['date']),
         'deals': d.get('deals'),
+        'supp_advice': d.get('supp_advice'),
+        'kb': KB,
         'coaches': ROSTER,
         'coach': d['profile'].get('coach', DEFAULT_COACH),
         'plan': d.get('plan'),
@@ -52,10 +56,13 @@ def save_profile():
     d = store.load()
     d['profile'] = {
         'name': str(body.get('name', '')),
+        'age': clean_num(body.get('age')),
+        'sex': str(body.get('sex', '')),
         'weight': clean_num(body.get('weight'), float),
         'goal_weight': clean_num(body.get('goal_weight'), float),
         'daily_protein_g': clean_num(body.get('daily_protein_g')),
         'daily_calories': clean_num(body.get('daily_calories')),
+        'notes': str(body.get('notes', '')),
         'coach': d['profile'].get('coach', DEFAULT_COACH),
     }
     store.save(d)
@@ -227,6 +234,44 @@ def remove_schedule(idx):
     d['supplement_schedule'].pop(idx)
     store.save(d)
     return jsonify({'ok': True})
+
+
+@bp.post('/supplements/advice')
+def supplements_advice():
+    d = store.load()
+    coach = get_coach(d['profile'].get('coach', DEFAULT_COACH))
+    ins = stats.insights(d)
+
+    today = date.today().isoformat()
+    week_ago = (date.today().toordinal() - 7)
+    cutoff = date.fromordinal(week_ago).isoformat()
+    recent_supps = [s for s in d['supplements'] if s['date'] >= cutoff]
+    missed = sum(1 for s in recent_supps if not s.get('taken', True))
+
+    context = {
+        'current_stack': d.get('supplement_schedule', []),
+        'supplements_logged_last_7d': len(recent_supps),
+        'missed_last_7d': missed,
+        'workouts_last_7d': ins.get('workout_count', 0),
+        'workout_types_last_7d': sorted({w['name'] for w in d['workouts'] if w['date'] >= cutoff}),
+    }
+    if ins.get('has_data'):
+        context['diet_last_7d'] = {
+            'avg_daily_protein_g': ins['avg_daily_protein'],
+            'protein_goal_g': ins['protein_goal'],
+            'avg_carbs_g_day': ins['avg_carbs_day'],
+            'avg_fat_g_day': ins['avg_fat_day'],
+            'avg_fiber_g_day': ins['avg_fiber_day'],
+            'days_logged': ins['days_logged'],
+        }
+    try:
+        advice = ai.supplement_advice(d['profile'], persona_prompt(coach), json.dumps(context))
+    except Exception as e:
+        return _err(e, 502)
+    d['supp_advice'] = {'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                        'coach': coach['id'], 'advice': advice}
+    store.save(d)
+    return jsonify(d['supp_advice'])
 
 
 @bp.post('/checklist/toggle')

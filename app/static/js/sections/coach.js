@@ -13,8 +13,9 @@ export function renderCoach(root, state) {
   // ── roster ──
   const grid = el('<div class="coach-grid"></div>');
   for (const c of coaches) {
+    const initials = c.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
     const card = el(`<button type="button" class="coach-card${c.id === selected?.id ? ' selected' : ''}">
-      <span class="coach-emoji">${c.emoji}</span>
+      <span class="plate-disc" style="width:44px;height:44px;font-size:14px">${esc(initials)}</span>
       <span class="coach-name">${esc(c.name)}</span>
       <span class="coach-style">${esc(c.style)}</span>
       <span class="coach-goal">${esc(c.goal)}</span>
