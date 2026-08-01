@@ -1,6 +1,6 @@
 """Computed stats served to the frontend: totals, trends, insights, progression."""
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from .data import MACRO_FIELDS
 
@@ -421,19 +421,21 @@ def readiness(data):
             'guidance': guidance, 'date': latest['date'], 'components': comps}
 
 
+def consecutive_days(dates_set):
+    """Days-in-a-row ending today that appear in the given date set."""
+    streak, day = 0, date.today()
+    while day.isoformat() in dates_set:
+        streak += 1
+        day -= timedelta(days=1)
+    return streak
+
+
 def achievements(data):
     """The trophy wall — earned by data, never by hand. Cutler-approved."""
     workouts = data['workouts']
     meals = data['meals']
     trn = training_summary(data)
     adh = supplement_adherence(data)
-
-    def consecutive_days(dates_set):
-        streak, day = 0, date.today()
-        while day.isoformat() in dates_set:
-            streak += 1
-            day -= timedelta(days=1)
-        return streak
 
     day_volume = {}
     for w in workouts:
@@ -484,6 +486,95 @@ def achievements(data):
     return [{'id': i, 'name': n, 'desc': d, 'earned': e,
              'progress': min(p, target), 'target': target}
             for i, n, d, e, p, target in defs]
+
+
+def dashboard_extras(data):
+    """Command-center intelligence: week grid, streaks, next best actions."""
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    protein_goal = data['profile'].get('daily_protein_g', 150) or 150
+    schedule = data.get('supplement_schedule', [])
+    prog = plan_progress(data)
+    plan_by_date = ({x['date']: x['status'] for x in prog['days']}
+                    if prog.get('has_plan') else {})
+    workout_dates = {w['date'] for w in data['workouts']}
+    weight_dates = {w['date'] for w in data['weights']}
+    vitals_dates = {v['date'] for v in data.get('vitals', [])}
+
+    # ── week-at-a-glance grid ──
+    grid = []
+    for i in range(7):
+        d = monday + timedelta(days=i)
+        iso = d.isoformat()
+        future = d > today
+        if future:
+            workout = plan_by_date.get(iso, 'future') if plan_by_date.get(iso) in ('rest',) else 'future'
+        elif iso in workout_dates:
+            workout = 'done'
+        elif plan_by_date.get(iso) == 'rest':
+            workout = 'rest'
+        elif plan_by_date.get(iso) == 'missed':
+            workout = 'missed'
+        else:
+            workout = 'none'
+        protein = sum(m.get('protein', 0) for m in data['meals'] if m['date'] == iso)
+        taken = sum(1 for item in schedule
+                    if any(s['date'] == iso and s['name'] == item['name']
+                           and s['time'] == item['time'] and s.get('taken')
+                           for s in data['supplements']))
+        grid.append({
+            'date': iso,
+            'day': d.strftime('%a'),
+            'is_today': d == today,
+            'future': future,
+            'workout': workout,
+            'protein_pct': min(100, round(protein / protein_goal * 100)),
+            'weighed': iso in weight_dates,
+            'vitals': iso in vitals_dates,
+            'supps_pct': round(taken / len(schedule) * 100) if schedule else None,
+        })
+
+    # ── streaks ──
+    streaks = {
+        'meals': consecutive_days({m['date'] for m in data['meals']}),
+        'weights': consecutive_days(weight_dates),
+        'vitals': consecutive_days(vitals_dates),
+        'workout_weeks': training_summary(data)['streak_weeks'],
+    }
+
+    # ── next best action (rule-based, top 2) ──
+    actions = []
+    now = datetime.now()
+    briefing = data.get('briefing') or {}
+    if briefing.get('date') != today.isoformat():
+        actions.append({'id': 'briefing', 'tab': 'dashboard',
+                        'text': "Get today's briefing from your coach."})
+    today_status = plan_by_date.get(today.isoformat())
+    if today_status == 'today':
+        plan_day = next((x for x in (data.get('plan') or {}).get('plan', {}).get('week', [])
+                         if today.strftime('%A').lower() in str(x.get('day', '')).lower()), None)
+        title = (plan_day or {}).get('title', 'your session')
+        actions.append({'id': 'train', 'tab': 'workouts',
+                        'text': f"Today is {title} — load it in Workouts."})
+    protein_today = sum(m.get('protein', 0) for m in data['meals']
+                        if m['date'] == today.isoformat())
+    if now.hour >= 15 and protein_today < protein_goal * 0.5:
+        actions.append({'id': 'protein', 'tab': 'meals',
+                        'text': f"{protein_goal - protein_today}g of protein still to go — "
+                                "ask for a meal suggestion."})
+    if today.isoformat() not in weight_dates and now.hour < 12:
+        actions.append({'id': 'weigh', 'tab': 'weight',
+                        'text': 'Morning weigh-in — daily beats perfect.'})
+    if schedule and now.hour >= 18:
+        left = sum(1 for item in schedule
+                   if not any(s['date'] == today.isoformat() and s['name'] == item['name']
+                              and s['time'] == item['time'] and s.get('taken')
+                              for s in data['supplements']))
+        if left:
+            actions.append({'id': 'supps', 'tab': 'supplements',
+                            'text': f"{left} supplement{'s' if left > 1 else ''} still unticked today."})
+
+    return {'week_grid': grid, 'streaks': streaks, 'actions': actions[:2]}
 
 
 def checklist(data):

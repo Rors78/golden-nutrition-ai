@@ -1,5 +1,6 @@
-// Dashboard: morning briefing, hero rings, today's plan, numbers, activity.
-import { el, esc, api, toast, refresh, metric, ring, markdown } from '../app.js';
+// Dashboard: the command center — briefing, next actions, rings, week grid,
+// streaks, today's plan, quick weigh-in, trophies, activity.
+import { el, esc, api, toast, refresh, metric, ring, markdown, CHART } from '../app.js';
 
 export function renderDashboard(root, state) {
   const p = state.profile;
@@ -44,6 +45,28 @@ export function renderDashboard(root, state) {
     root.append(bb);
   }
 
+  // Next best actions — what the data says to do right now
+  const dash = state.stats.dashboard || {};
+  if (dash.actions?.length) {
+    const row = el('<div style="display:grid;gap:8px;margin:0 0 10px"></div>');
+    for (const a of dash.actions) {
+      const btn = el(`<button type="button" class="callout" style="text-align:left;cursor:pointer;width:100%;border:0;border-left:4px solid var(--gold);color:var(--ink);font:inherit;font-size:13px">
+        <strong style="color:var(--gold-bright)">Next up:</strong> ${esc(a.text)}</button>`);
+      btn.addEventListener('click', async () => {
+        if (a.id === 'briefing') {
+          btn.disabled = true;
+          btn.textContent = 'Your coach is writing…';
+          try { await api('POST', '/briefing'); toast('Briefing ready'); await refresh(); }
+          catch (e) { toast(e.message); btn.disabled = false; }
+        } else {
+          location.hash = a.tab;
+        }
+      });
+      row.append(btn);
+    }
+    root.append(row);
+  }
+
   // Steps from the watch, if vitals are flowing
   const vsum = state.stats.vitals;
 
@@ -63,6 +86,42 @@ export function renderDashboard(root, state) {
     hero.append(el(`<p style="text-align:center;color:var(--ink-2);font-size:13px;margin:10px 0 0">${esc(rd.guidance)}</p>`));
   }
   root.append(hero);
+
+  // Week at a glance: the consistency grid
+  if (dash.week_grid?.length) {
+    const DOT = (on, color, label) =>
+      `<span title="${esc(label)}" style="width:10px;height:10px;border-radius:3px;display:inline-block;background:${on ? color : 'var(--card-2)'}"></span>`;
+    const W_COLOR = { done: 'var(--good)', missed: 'var(--warn)', rest: 'var(--muted)',
+                      none: 'var(--card-2)', future: 'var(--card-2)' };
+    const wk = el(`<div class="card" style="margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+        <p class="chart-title" style="margin:0">This week</p>
+        <span style="font-size:11px;color:var(--muted)">
+          <span style="color:var(--good)">■</span> trained ·
+          <span style="color:var(--gold)">■</span> protein ·
+          <span style="color:var(--steel)">■</span> weighed ·
+          <span style="color:var(--ink-2)">■</span> vitals</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:10px" class="wk-cols"></div>
+      <p class="wk-streaks" style="margin:12px 0 0;font-size:12px;color:var(--ink-2);font-family:var(--font-mono)"></p>
+    </div>`);
+    const cols = wk.querySelector('.wk-cols');
+    for (const d of dash.week_grid) {
+      cols.append(el(`<div style="text-align:center;padding:8px 2px;border-radius:8px;${
+        d.is_today ? 'background:var(--card-2);outline:1px solid var(--gold-dim)' : ''}">
+        <div style="font-size:10px;font-weight:800;letter-spacing:.08em;color:${d.is_today ? 'var(--gold-bright)' : 'var(--muted)'};text-transform:uppercase">${esc(d.day)}</div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center;margin-top:6px">
+          <span title="workout: ${esc(d.workout)}" style="width:10px;height:10px;border-radius:3px;display:inline-block;background:${W_COLOR[d.workout] || 'var(--card-2)'}"></span>
+          ${DOT(d.protein_pct >= 80, 'var(--gold)', `protein ${d.protein_pct}%`)}
+          ${DOT(d.weighed, 'var(--steel)', d.weighed ? 'weighed in' : 'no weigh-in')}
+          ${DOT(d.vitals, 'var(--ink-2)', d.vitals ? 'vitals synced' : 'no vitals')}
+        </div></div>`));
+    }
+    const s = dash.streaks || {};
+    wk.querySelector('.wk-streaks').textContent =
+      `Streaks — meals ${s.meals}d · weigh-ins ${s.weights}d · vitals ${s.vitals}d · training weeks ${s.workout_weeks}`;
+    root.append(wk);
+  }
 
   const grid = el('<div class="cards metrics" style="margin-top:14px"></div>');
   grid.append(
@@ -116,6 +175,46 @@ export function renderDashboard(root, state) {
     strip.querySelector('button').addEventListener('click', () => { location.hash = 'coach'; });
     root.append(strip);
   }
+
+  // Body: quick weigh-in + 30-day trend sparkline
+  const wt = state.stats.weight;
+  const body = el(`<div class="card" style="margin-top:14px">
+    <div class="form-row" style="align-items:end">
+      <div style="flex:1;min-width:180px">
+        <p class="chart-title" style="margin:0 0 4px">Body</p>
+        ${wt.has_data
+          ? `<p style="margin:0;font-family:var(--font-mono);font-size:13px;color:var(--ink-2)">
+              ${wt.current} lbs${wt.rate_per_week != null ? ` · ${wt.rate_per_week > 0 ? '+' : ''}${wt.rate_per_week} lbs/wk` : ''}${wt.eta ? ` · goal ~${esc(wt.eta)}` : ''}</p>`
+          : '<p style="margin:0;color:var(--muted);font-size:13px">No weigh-ins yet — start the trend right here.</p>'}
+      </div>
+      <label style="flex:0 1 150px">Today's weight
+        <input name="qw" type="number" step="0.1" min="1" placeholder="${wt.has_data ? wt.current : '200.0'}"></label>
+      <button class="gold-btn" type="button" style="flex:0 1 auto">Log</button>
+    </div>
+    <div class="body-spark" style="margin-top:8px"></div>
+  </div>`);
+  body.querySelector('button').addEventListener('click', async () => {
+    const val = body.querySelector('input').value;
+    if (!val) { toast('Type a weight first.'); return; }
+    try {
+      await api('POST', '/weights', { weight: val });
+      toast('Weigh-in logged');
+      await refresh();
+    } catch (e) { toast(e.message); }
+  });
+  if (wt.has_data && wt.series_avg?.length >= 2) {
+    const spark = body.querySelector('.body-spark');
+    spark.style.height = '64px';
+    Plotly.newPlot(spark,
+      [{ x: wt.series_avg.map(x => x.date), y: wt.series_avg.map(x => x.avg),
+         mode: 'lines', line: { color: CHART.gold, width: 2, shape: 'spline' },
+         hovertemplate: '%{x}<br>%{y:.1f} lbs<extra>7d avg</extra>' }],
+      CHART.layout({ height: 64, margin: { l: 38, r: 6, t: 4, b: 16 },
+        xaxis: { visible: false, fixedrange: true },
+        yaxis: { gridcolor: 'rgba(110,118,131,.12)', zeroline: false, fixedrange: true, tickfont: { size: 9 } } }),
+      CHART.config);
+  }
+  root.append(body);
 
   // Trophy wall — earned by data, never by hand
   const badges = state.stats.achievements || [];
