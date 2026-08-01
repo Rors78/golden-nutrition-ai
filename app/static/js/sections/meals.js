@@ -1,11 +1,47 @@
-// Meals: AI quick log, one-tap re-log, manual entry, editable history.
-import { el, esc, api, toast, refresh, rowActions } from '../app.js';
+// Meals: macros-left, AI quick log + suggestions, coach meal plan, quick add,
+// manual entry, editable history.
+import { el, esc, api, toast, refresh, metric, rowActions } from '../app.js';
 
 const MACROS = ['protein', 'calories', 'carbs', 'fat', 'fiber'];
 
+async function logMeal(fields, note) {
+  await api('POST', '/meals', { ...fields, date: undefined, time: undefined, notes: note });
+}
+
 export function renderMeals(root, state) {
   root.append(el('<h2 class="section-title">Meals</h2>'));
-  root.append(el('<p class="section-sub">Tell Claude what you ate, re-log a regular, or enter it by hand.</p>'));
+  root.append(el('<p class="section-sub">Tell Claude what you ate, ask it what to eat, or enter it by hand.</p>'));
+
+  // ── what's left today ──
+  const p = state.profile;
+  const totals = state.stats.today.totals;
+  const leftP = Math.max(0, (p.daily_protein_g || 0) - totals.protein);
+  const leftC = Math.max(0, (p.daily_calories || 0) - totals.calories);
+  const grid = el('<div class="cards metrics"></div>');
+  grid.append(
+    metric('Protein left', leftP, { suffix: 'g', small: `of ${p.daily_protein_g}g` }),
+    metric('Calories left', leftC, { small: `of ${p.daily_calories}` }),
+    metric('Meals today', state.stats.today.meal_count, {}),
+  );
+  root.append(grid);
+
+  // calorie-source split: protein / carbs / fat
+  const pCal = totals.protein * 4, cCal = totals.carbs * 4, fCal = totals.fat * 9;
+  const sumCal = pCal + cCal + fCal;
+  if (sumCal > 0) {
+    const seg = (val, color) => `<span style="flex:${val};background:${color};border-radius:3px;min-width:${val > 0 ? 6 : 0}px"></span>`;
+    const pct = v => Math.round(v / sumCal * 100);
+    root.append(el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Where today's calories came from</p>
+      <div style="display:flex;gap:2px;height:14px;margin:10px 0 8px">${
+        seg(pCal, 'var(--gold)')}${seg(cCal, 'var(--steel)')}${seg(fCal, 'var(--muted)')}</div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--ink-2)">
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--gold);margin-right:6px"></span>Protein ${pct(pCal)}% · ${Math.round(pCal)} cal</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--steel);margin-right:6px"></span>Carbs ${pct(cCal)}% · ${Math.round(cCal)} cal</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--muted);margin-right:6px"></span>Fat ${pct(fCal)}% · ${Math.round(fCal)} cal</span>
+      </div>
+    </div>`));
+  }
 
   // ── AI quick log ──
   const aiCard = el(`<div class="card">
@@ -62,6 +98,78 @@ export function renderMeals(root, state) {
   }
 
   root.append(aiCard);
+
+  // ── "what should I eat next?" ──
+  const coach = (state.coaches || []).find(c => c.id === state.coach);
+  const sugCard = el(`<div class="card" style="margin-top:14px">
+    <p class="chart-title">What should I eat next?</p>
+    <p style="color:var(--ink-2);font-size:13px;margin:8px 0">${esc(coach?.name || 'Your coach')} looks at your
+      ${leftP}g protein / ${leftC} cal remaining, what you've eaten today, and their nutrition philosophy —
+      then suggests three real options you can log in one tap.</p>
+    <button class="gold-btn" type="button">Suggest my next meal</button>
+    <div class="sug-result"></div>
+  </div>`);
+  const sugBtn = sugCard.querySelector('button');
+  const sugOut = sugCard.querySelector('.sug-result');
+  sugBtn.addEventListener('click', async () => {
+    sugBtn.disabled = true;
+    sugOut.innerHTML = `<p style="margin-top:12px"><span class="spinner"></span>${esc(coach?.name || 'Coach')} is checking the fridge — about a minute…</p>`;
+    try {
+      const { suggestions } = await api('POST', '/meals/suggest');
+      sugOut.innerHTML = '';
+      for (const s of suggestions) {
+        const row = el(`<div class="deal" style="margin-top:8px">
+          <div class="deal-top"><span class="deal-item">${esc(s.name)}</span>
+            <span style="font-family:var(--font-mono);font-size:12px;color:var(--gold-bright);white-space:nowrap">${s.protein}g P · ${s.calories} cal</span></div>
+          <div class="deal-meta">${esc(s.items)}</div>
+          <div class="deal-meta" style="color:var(--steel)">${esc(s.why)}</div>
+          <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">${s.carbs}g C · ${s.fat}g F · ${s.fiber}g fiber</span>
+            <button class="ghost-btn" type="button" style="min-height:34px;padding:6px 14px;font-size:12px">Log it</button>
+          </div></div>`);
+        row.querySelector('button').addEventListener('click', async () => {
+          try {
+            await logMeal(s, 'Suggested by Claude');
+            toast(`Logged: ${s.name}`);
+            await refresh();
+          } catch (e) { toast(e.message); }
+        });
+        sugOut.append(row);
+      }
+    } catch (e) {
+      sugOut.innerHTML = '';
+      toast(e.message);
+    } finally { sugBtn.disabled = false; }
+  });
+  root.append(sugCard);
+
+  // ── coach's sample meal day from the weekly plan ──
+  const planMeals = state.plan?.plan?.meals || [];
+  if (planMeals.length) {
+    const planCoach = (state.coaches || []).find(c => c.id === state.plan.coach);
+    const pm = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">${esc(planCoach?.name || 'Coach')}'s sample meal day</p>
+      <div class="table-wrap" style="margin-top:8px"><table>
+        <thead><tr><th>Meal</th><th>What</th><th class="num">Protein</th><th class="num">Cal</th><th></th></tr></thead>
+        <tbody></tbody></table></div></div>`);
+    const tbody = pm.querySelector('tbody');
+    for (const m of planMeals) {
+      const tr = el(`<tr><td>${esc(m.meal)}</td><td>${esc(m.items)}</td>
+        <td class="num">${m.protein}g</td><td class="num">${m.calories}</td>
+        <td class="row-actions"><button class="icon-btn" title="Log this meal">＋</button></td></tr>`);
+      tr.querySelector('button').addEventListener('click', async () => {
+        try {
+          await logMeal({ name: `${m.meal}: ${m.items}`.slice(0, 120),
+                          protein: m.protein, calories: m.calories },
+                        'From the coach plan');
+          toast(`Logged: ${m.meal}`);
+          await refresh();
+        } catch (e) { toast(e.message); }
+      });
+      tbody.append(tr);
+    }
+    root.append(pm);
+  }
 
   // ── quick add ──
   const quick = state.stats.quick_meals;

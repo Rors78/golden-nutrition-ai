@@ -225,6 +225,90 @@ def find_deals(items, location=""):
     return cleaned
 
 
+SUGGEST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "suggestions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "items": {"type": "string"},
+                    "protein": {"type": "integer"},
+                    "calories": {"type": "integer"},
+                    "carbs": {"type": "integer"},
+                    "fat": {"type": "integer"},
+                    "fiber": {"type": "integer"},
+                    "why": {"type": "string"}
+                },
+                "required": ["name", "items", "protein", "calories",
+                             "carbs", "fat", "fiber", "why"],
+                "additionalProperties": False
+            }
+        }
+    },
+    "required": ["suggestions"],
+    "additionalProperties": False
+}
+
+
+def suggest_meals(profile, persona, context):
+    """Suggest the next meals to eat, fitted to what's left of today's macros."""
+    ask = (
+        "What should I eat next?\n\n"
+        f"My profile: {json.dumps(profile)}\n"
+        f"Today so far and what's left of my goals: {context}\n\n"
+        "Suggest exactly 3 realistic options for my NEXT meal or snack — quick to "
+        "prepare, matching YOUR nutrition philosophy, sized so the rest of today's "
+        "remaining protein and calories work out. Vary them against what I've "
+        "already eaten today and my recent regulars. For each: a short name, the "
+        "actual items/portions, estimated protein/calories/carbs/fat/fiber, and one "
+        "line on why it fits right now (tie it to my remaining numbers)."
+    )
+    shape = (
+        "Respond with ONLY a JSON object — no markdown fences, no commentary — in exactly "
+        'this shape:\n{"suggestions": [{"name": "...", "items": "...", "protein": 0, '
+        '"calories": 0, "carbs": 0, "fat": 0, "fiber": 0, "why": "..."}]}'
+    )
+    if cli_available():
+        raw = _extract_json(_run_cli(f"{persona}\n\n{ask}\n{shape}", timeout=240))
+    elif backend_name():
+        response = _sdk_create(
+            model=CLAUDE_MODEL,
+            max_tokens=16000,
+            system=persona,
+            messages=[{"role": "user", "content": ask}],
+            output_config={"format": {"type": "json_schema", "schema": SUGGEST_SCHEMA}},
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError("Claude declined to process this request.")
+        raw = json.loads(next(b.text for b in response.content if b.type == "text"))
+    else:
+        raise AIUnavailable(
+            "No Claude backend found. Install Claude Code and log in (uses your "
+            "Claude subscription), or set ANTHROPIC_API_KEY."
+        )
+
+    cleaned = []
+    for s in raw.get("suggestions", []):
+        if not str(s.get('name', '')).strip():
+            continue
+        cleaned.append({
+            'name': str(s['name']).strip(),
+            'items': str(s.get('items', '')).strip(),
+            'protein': clean_num(s.get('protein')),
+            'calories': clean_num(s.get('calories')),
+            'carbs': clean_num(s.get('carbs')),
+            'fat': clean_num(s.get('fat')),
+            'fiber': clean_num(s.get('fiber')),
+            'why': str(s.get('why', '')).strip(),
+        })
+    if not cleaned:
+        raise RuntimeError("No suggestions came back — try again.")
+    return cleaned
+
+
 SUPP_SCHEMA = {
     "type": "object",
     "properties": {

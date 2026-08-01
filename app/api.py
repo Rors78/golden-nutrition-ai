@@ -139,6 +139,35 @@ def ai_parse_meals():
         return _err(e, 502)
 
 
+@bp.post('/meals/suggest')
+def suggest_meals():
+    d = store.load()
+    coach = get_coach(d['profile'].get('coach', DEFAULT_COACH))
+    today = stats.today_summary(d)
+    totals = today['totals']
+    remaining = {
+        'protein_g': max(0, d['profile'].get('daily_protein_g', 150) - totals['protein']),
+        'calories': max(0, d['profile'].get('daily_calories', 2000) - totals['calories']),
+    }
+    context = json.dumps({
+        'time_now': datetime.now().strftime('%H:%M'),
+        'remaining_today': remaining,
+        'eaten_today': [{'name': m['name'], 'protein': m.get('protein', 0),
+                         'calories': m.get('calories', 0)}
+                        for m in sorted(
+                            (m for m in d['meals'] if m['date'] == date.today().isoformat()),
+                            key=lambda m: m.get('time', ''))],
+        'todays_macros_so_far': totals,
+        'recent_regulars': [m['name'] for m in stats.quick_meals(d, limit=8)],
+    })
+    try:
+        return jsonify({'suggestions': ai.suggest_meals(d['profile'],
+                                                        persona_prompt(coach), context),
+                        'coach': coach['id']})
+    except Exception as e:
+        return _err(e, 502)
+
+
 @bp.post('/meals/ai/add')
 def ai_add_meals():
     body = request.get_json(force=True)

@@ -292,6 +292,32 @@ def test_schedule_accepts_custom_names(client):
         {"name": "Creatine Monohydrate", "time": "Morning"}]
 
 
+def test_meal_suggestions_use_remaining_macros_and_persona(client, monkeypatch):
+    client.post("/api/coach/select", json={"id": "wicks"})
+    client.post("/api/meals", json={"name": "Eggs on toast", "protein": 30, "calories": 450})
+
+    fake = [{"name": "Chicken stir-fry", "items": "chicken, veg, rice",
+             "protein": 45, "calories": 550, "carbs": 55, "fat": 12,
+             "fiber": 6, "why": "covers half your remaining protein"}]
+    captured = {}
+
+    def fake_suggest(profile, persona, context):
+        captured["persona"] = persona
+        captured["context"] = json.loads(context)
+        return fake
+    monkeypatch.setattr(ai, "suggest_meals", fake_suggest)
+
+    r = client.post("/api/meals/suggest")
+    assert r.status_code == 200
+    assert r.get_json()["suggestions"] == fake
+    assert r.get_json()["coach"] == "wicks"
+    assert "Joe Wicks" in captured["persona"]
+    ctx = captured["context"]
+    assert ctx["remaining_today"] == {"protein_g": 120, "calories": 1550}
+    assert ctx["eaten_today"][0]["name"] == "Eggs on toast"
+    assert "recent_regulars" in ctx and "time_now" in ctx
+
+
 def test_supplement_adherence(client):
     assert client.get("/api/state").get_json()["stats"]["adherence"] == {"has_schedule": False}
     client.post("/api/schedule", json={"name": "Creatine", "time": "Morning"})
