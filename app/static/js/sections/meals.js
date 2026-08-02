@@ -86,6 +86,7 @@ export function renderMeals(root, state) {
         <input name="description" type="text" placeholder="chicken burrito with rice and beans, and a protein shake" autocomplete="off"></label>
       <button class="gold-btn" type="submit">Estimate with AI</button>
       <button class="ghost-btn photo-btn" type="button" style="flex:0 1 auto">Snap the plate</button>
+      <button class="ghost-btn scan-btn" type="button" style="flex:0 1 auto">Scan barcode</button>
       <input type="file" accept="image/*" capture="environment" hidden class="photo-input">
     </form>
     <div class="ai-result"></div>
@@ -130,6 +131,107 @@ export function renderMeals(root, state) {
       }
     };
     reader.readAsDataURL(file);
+  });
+
+  // ── barcode scan → Open Food Facts lookup ──
+  let scanStream = null;
+  const stopScan = () => {
+    scanStream?.getTracks().forEach(t => t.stop());
+    scanStream = null;
+  };
+
+  async function lookupBarcode(code) {
+    aiResult.innerHTML = '<p style="margin:12px 0 0"><span class="spinner"></span>Looking it up on Open Food Facts…</p>';
+    try {
+      const hit = await api('GET', `/food/barcode/${encodeURIComponent(code)}`);
+      showProduct(hit, code);
+    } catch (err) {
+      aiResult.innerHTML = '';
+      toast(err.message);
+    }
+  }
+
+  function showProduct(hit, code) {
+    const basisLabel = hit.basis === 'serving'
+      ? `per serving${hit.serving_size ? ` (${hit.serving_size})` : ''}`
+      : 'per 100 g';
+    const m = hit.macros;
+    aiResult.innerHTML = '';
+    const wrap = el(`<div style="margin-top:12px">
+      <div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap">
+        <strong style="font-size:14px">${esc(hit.name)}</strong>
+        ${hit.brand ? `<span style="font-size:12px;color:var(--muted)">${esc(hit.brand)}</span>` : ''}
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--steel)">${esc(basisLabel)}</span>
+      </div>
+      <p style="font-family:var(--font-mono);font-size:13px;color:var(--ink-2);margin:8px 0">
+        ${m.protein}g P · ${m.calories} cal · ${m.carbs}g C · ${m.fat}g F · ${m.fiber}g fiber</p>
+      <div class="form-row" style="align-items:flex-end">
+        <label style="flex:0 1 170px">${hit.basis === 'serving' ? 'Servings' : 'Amount (×100 g)'}
+          <input class="bc-mult" type="number" min="0.25" step="0.25" value="1"></label>
+        <button class="gold-btn bc-add" type="button" style="flex:0 1 auto">Add to log</button>
+        <button class="ghost-btn bc-discard" type="button" style="flex:0 1 auto">Discard</button>
+      </div></div>`);
+    wrap.querySelector('.bc-add').addEventListener('click', async () => {
+      const mult = Number(wrap.querySelector('.bc-mult').value) || 1;
+      const scale = f => Math.round((m[f] || 0) * mult * 10) / 10;
+      try {
+        await logMeal({ name: [hit.brand, hit.name].filter(Boolean).join(' ').slice(0, 120),
+                        protein: scale('protein'), calories: Math.round((m.calories || 0) * mult),
+                        carbs: scale('carbs'), fat: scale('fat'), fiber: scale('fiber') },
+                      `Barcode ${code}`);
+        toast(`Logged: ${hit.name}`);
+        await refresh();
+      } catch (e) { toast(e.message); }
+    });
+    wrap.querySelector('.bc-discard').addEventListener('click', () => { aiResult.innerHTML = ''; });
+    aiResult.append(wrap);
+  }
+
+  aiCard.querySelector('.scan-btn').addEventListener('click', async () => {
+    stopScan();
+    aiResult.innerHTML = '';
+    const pane = el(`<div style="margin-top:12px">
+      <div class="bc-cam-slot"></div>
+      <form class="form-row" style="align-items:flex-end">
+        <label style="flex:0 1 240px">Barcode digits
+          <input class="bc-code" type="text" inputmode="numeric" placeholder="e.g. 3017624010701" autocomplete="off"></label>
+        <button class="ghost-btn" type="submit" style="flex:0 1 auto">Look up</button>
+        <button class="ghost-btn bc-cancel" type="button" style="flex:0 1 auto">Cancel</button>
+      </form></div>`);
+    pane.querySelector('form').addEventListener('submit', ev => {
+      ev.preventDefault();
+      const code = pane.querySelector('.bc-code').value.trim();
+      if (!code) { toast('Type the digits under the barcode.'); return; }
+      stopScan();
+      lookupBarcode(code);
+    });
+    pane.querySelector('.bc-cancel').addEventListener('click', () => { stopScan(); aiResult.innerHTML = ''; });
+    aiResult.append(pane);
+
+    // Live camera scanning where the browser supports it (Chrome/Android);
+    // everywhere else the digits field above still works.
+    if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) return;
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    } catch { return; /* camera denied — manual entry remains */ }
+    const video = el('<video muted playsinline style="width:100%;max-width:420px;border-radius:6px;margin-bottom:10px"></video>');
+    pane.querySelector('.bc-cam-slot').append(video);
+    video.srcObject = scanStream;
+    await video.play().catch(() => {});
+    const detector = new BarcodeDetector({
+      formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+    const poll = setInterval(async () => {
+      if (!scanStream || !video.isConnected) { clearInterval(poll); stopScan(); return; }
+      try {
+        const codes = await detector.detect(video);
+        if (codes.length) {
+          clearInterval(poll);
+          stopScan();
+          if (navigator.vibrate) navigator.vibrate(120);
+          lookupBarcode(codes[0].rawValue);
+        }
+      } catch { /* detector hiccup — keep polling */ }
+    }, 350);
   });
 
   function showParsed(meals) {
