@@ -484,6 +484,13 @@ def notify_test():
     return jsonify({'ok': True})
 
 
+def _body_comp_brief(d):
+    """Compact body-composition summary for AI contexts (skip the series)."""
+    bc = stats.body_comp(d)
+    return {'bf_pct': bc['current'], 'change_since_first': bc['change'],
+            'method': bc['method']} if bc['current'] is not None else None
+
+
 @bp.post('/briefing')
 def briefing():
     d = store.load()
@@ -508,6 +515,9 @@ def briefing():
                                     and i['servings_left'] <= 7],
         'latest_weight': (sorted(d['weights'], key=lambda w: w['date'])[-1]
                           if d['weights'] else None),
+        'body_comp': _body_comp_brief(d),
+        'tape_latest': (sorted(d.get('measurements', []), key=lambda m: m['date'])[-1]
+                        if d.get('measurements') else None),
     })
     try:
         text = ai.daily_briefing(d['profile'], persona_prompt(coach), context)
@@ -1001,6 +1011,10 @@ def coach():
         'supplements': [s for s in d['supplements'] if s['date'] >= cutoff],
         'weigh_ins': [w for w in d['weights'] if w['date'] >= cutoff],
         'vitals': [v for v in d.get('vitals', []) if v['date'] >= cutoff],
+        'measurements': [m for m in d.get('measurements', []) if m['date'] >= cutoff],
+        'body_comp': _body_comp_brief(d),
+        'recent_prs': stats.recent_prs(d),
+        'readiness': stats.readiness(d),
     }
     if not week_data['meals'] and not week_data['workouts']:
         return _err("Log some meals or workouts first — there's nothing from the last 7 days to review.")
@@ -1037,6 +1051,7 @@ def coach_chat():
         'plan_progress': stats.plan_progress(d),
         'latest_weight': (sorted(d['weights'], key=lambda w: w['date'])[-1]
                           if d['weights'] else None),
+        'body_comp': _body_comp_brief(d),
         'profile_notes': d['profile'].get('notes', ''),
     })
     history = d.get('coach_chat', [])

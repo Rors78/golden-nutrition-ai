@@ -108,11 +108,13 @@ so a long AI call never blocks the rest of the app.
 ./scripts/install_backup_timer.sh
 ./scripts/install_briefing_timer.sh
 ./scripts/install_price_watch_timer.sh
+./scripts/install_review_timer.sh      # Sunday 18:00 coaching review
 ```
 
-**Windows** — one installer registers all three as Scheduled Tasks
-(backup 03:30, briefing 07:00, price watch 09:00); add `-StartAtLogon`
-to also launch the app server every time you log in:
+**Windows** — one installer registers all four as Scheduled Tasks
+(backup 03:30, briefing 07:00, price watch 09:00, weekly review Sunday
+18:00); add `-StartAtLogon` to also launch the app server every time
+you log in:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install_windows_tasks.ps1 -StartAtLogon
 ```

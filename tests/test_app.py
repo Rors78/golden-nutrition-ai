@@ -125,6 +125,34 @@ PNG_1PX = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
            "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 
 
+def test_ai_contexts_include_body_data(client, monkeypatch):
+    data = week_of_data()
+    data["profile"]["sex"] = "male"          # height_in 70 already set
+    data["measurements"] = [{"date": date.today().isoformat(),
+                             "waist_in": 34, "neck_in": 15}]
+    seed(data)
+    captured = {}
+
+    monkeypatch.setattr(ai, "daily_briefing",
+                        lambda p, persona, context: captured.update(brief=context) or "ok")
+    assert client.post("/api/briefing").status_code == 200
+    assert '"body_comp"' in captured["brief"]
+    assert '"tape_latest"' in captured["brief"]
+    assert json.loads(captured["brief"])["body_comp"]["bf_pct"] == pytest.approx(17.5, abs=0.1)
+
+    monkeypatch.setattr(ai, "coaching_summary",
+                        lambda wd, persona: captured.update(week=wd) or "ok")
+    assert client.post("/api/coach").status_code == 200
+    wd = captured["week"]
+    assert wd["measurements"] and wd["body_comp"]["bf_pct"] is not None
+    assert "recent_prs" in wd and "readiness" in wd
+
+    monkeypatch.setattr(ai, "coach_chat",
+                        lambda persona, hist, msg, snap: captured.update(chat=snap) or "ok")
+    assert client.post("/api/coach/chat", json={"message": "hey"}).status_code == 200
+    assert '"body_comp"' in captured["chat"]
+
+
 def test_progress_photos(client):
     r = client.post("/api/photos", json={"image": PNG_1PX})
     assert r.status_code == 200
