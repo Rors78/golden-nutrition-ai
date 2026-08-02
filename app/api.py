@@ -12,7 +12,7 @@ from flask import Blueprint, jsonify, request, Response, send_from_directory
 
 from . import ai, data as store, food_db, notify, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
-from .data import clean_num
+from .data import MACRO_FIELDS, clean_num
 from .remedies_kb import kb_stats, load_kb, remedy_of_day, search_kb
 from .supplement_kb import KB
 
@@ -81,6 +81,7 @@ def get_state():
         'vitals': sorted(d.get('vitals', []), key=lambda v: v['date']),
         'measurements': sorted(d.get('measurements', []), key=lambda m: m['date']),
         'photos': d.get('photos', []),
+        'recipes': d.get('recipes', []),
         'settings': d['settings'],
         'briefing': d.get('briefing'),
         'deals': d.get('deals'),
@@ -562,6 +563,65 @@ def add_weight():
     d['weights'].append({'date': day, 'weight': lbs})
     d['weights'].sort(key=lambda w: w['date'])
     d['profile']['weight'] = d['weights'][-1]['weight']
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.post('/recipes')
+def add_recipe():
+    body = request.get_json(force=True)
+    name = str(body.get('name', '')).strip()
+    if not name:
+        return _err('Recipe needs a name.')
+    servings = clean_num(body.get('servings'), float)
+    if servings <= 0:
+        servings = 1
+    items = []
+    for r in body.get('items', []):
+        iname = str(r.get('name', '')).strip()
+        if not iname:
+            continue
+        items.append({'name': iname,
+                      **{f: clean_num(r.get(f), float) for f in MACRO_FIELDS}})
+    if not items:
+        return _err('Recipe needs at least one item.')
+    d = store.load()
+    d.setdefault('recipes', [])
+    d['recipes'].append({'name': name[:80], 'servings': servings, 'items': items})
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.post('/recipes/<int:idx>/log')
+def log_recipe(idx):
+    servings = clean_num(request.get_json(force=True).get('servings'), float)
+    if servings <= 0:
+        servings = 1
+    d = store.load()
+    recipes = d.get('recipes', [])
+    if not 0 <= idx < len(recipes):
+        return _err('No such recipe.', 404)
+    r = recipes[idx]
+    per = {f: sum(i.get(f, 0) for i in r['items']) / (r.get('servings') or 1)
+           for f in MACRO_FIELDS}
+    d['meals'].append({
+        'date': date.today().isoformat(),
+        'time': datetime.now().strftime('%H:%M'),
+        'name': r['name'] + (f' ×{servings:g}' if servings != 1 else ''),
+        **{f: round(per[f] * servings, 1) for f in MACRO_FIELDS},
+        'notes': 'From recipe',
+    })
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.delete('/recipes/<int:idx>')
+def delete_recipe(idx):
+    d = store.load()
+    recipes = d.get('recipes', [])
+    if not 0 <= idx < len(recipes):
+        return _err('No such recipe.', 404)
+    recipes.pop(idx)
     store.save(d)
     return jsonify({'ok': True})
 

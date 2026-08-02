@@ -25,6 +25,7 @@ DEFAULT_DATA = {
     'vitals': [],
     'measurements': [],
     'photos': [],
+    'recipes': [],
     'shopping_list': [],
     'watches': [],
     'remedy_cabinet': [],
