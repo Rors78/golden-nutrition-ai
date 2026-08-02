@@ -2,7 +2,9 @@
 import csv
 import io
 import json
+import platform
 import secrets
+import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -196,6 +198,47 @@ def add_meal():
     d['meals'].append(meal)
     store.save(d)
     return jsonify({'ok': True})
+
+
+@bp.get('/system')
+def system_pulse():
+    """Health of the machinery guarding the user's data: backups, AI backend,
+    server, data-file stats. Powers the footer's System pulse dialog."""
+    d = store.load()
+    df = store.DATA_FILE
+    file_info = {'bytes': 0, 'modified': None}
+    if df.exists():
+        st = df.stat()
+        file_info = {'bytes': st.st_size,
+                     'modified': datetime.fromtimestamp(st.st_mtime).isoformat(timespec='minutes')}
+    counts = {k: len(d.get(k) or []) for k in
+              ('meals', 'workouts', 'supplements', 'weights', 'vitals')}
+    warnings = []
+    bdir = df.resolve().parent / 'backups'
+    snaps = sorted(bdir.glob('nutrition_data-*.json')) if bdir.is_dir() else []
+    backups = {'count': len(snaps), 'newest': None, 'age_days': None}
+    if snaps:
+        newest = snaps[-1]
+        age = round((datetime.now().timestamp() - newest.stat().st_mtime) / 86400, 1)
+        backups.update({'newest': newest.name, 'age_days': age})
+        if age > 2:
+            warnings.append(f'Newest backup is {age} days old — is the nightly '
+                            'backup job still running?')
+    else:
+        warnings.append('No backups yet — install the nightly backup job '
+                        '(scripts/install_backup_timer.sh or '
+                        'scripts\\install_windows_tasks.ps1).')
+    if not ai.backend_name():
+        warnings.append('No AI backend — install Claude Code or set ANTHROPIC_API_KEY.')
+    return jsonify({
+        'data_file': {**file_info, 'counts': counts, 'path': str(df.resolve())},
+        'backups': backups,
+        'briefing_date': (d.get('briefing') or {}).get('date'),
+        'ai_backend': ai.backend_name(),
+        'server': request.environ.get('SERVER_SOFTWARE') or 'Flask dev server',
+        'platform': f'Python {platform.python_version()} on {sys.platform}',
+        'warnings': warnings,
+    })
 
 
 @bp.get('/food/barcode/<code>')

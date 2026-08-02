@@ -121,6 +121,25 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_system_pulse(client):
+    from pathlib import Path
+    seed(week_of_data())
+    s = client.get("/api/system").get_json()
+    assert s["data_file"]["counts"]["meals"] == 6
+    assert s["data_file"]["bytes"] > 0
+    assert s["backups"]["count"] == 0
+    assert any("backup" in w.lower() for w in s["warnings"])
+
+    # stage two snapshots — count and freshness reported, warning gone
+    Path("backups").mkdir()
+    Path("backups/nutrition_data-2026-01-01.json").write_text("{}")
+    Path(f"backups/nutrition_data-{date.today().isoformat()}.json").write_text("{}")
+    s = client.get("/api/system").get_json()
+    assert s["backups"]["count"] == 2
+    assert s["backups"]["age_days"] <= 0.1
+    assert not any("backup job" in w for w in s["warnings"])
+
+
 def test_barcode_normalize():
     from app.food_db import normalize
     per_serving = {"status": 1, "product": {
