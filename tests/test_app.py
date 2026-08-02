@@ -121,6 +121,37 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_training_strain(client):
+    # ~1 week of history only → no chronic baseline, radar stays silent
+    seed(week_of_data())
+    s = client.get("/api/state").get_json()["stats"]["strain"]
+    assert s["has_data"] is False
+
+    # five weeks of steadily climbing volume: 3 sessions/week, weight rising
+    # 100 → 200 by 25/wk (weekly volume 15,000 → 30,000)
+    data = week_of_data()
+    data["workouts"] = []
+    for wk in range(5):                       # wk 0 = the current week
+        for d_off in (1, 3, 5):
+            day = (date.today() - timedelta(days=7 * wk + d_off)).isoformat()
+            data["workouts"].append({
+                "date": day, "time": "07:00", "name": "Legs", "duration": 60,
+                "intensity": "Hard",
+                "exercises": [{"exercise": "Squats", "sets": 5, "reps": 10,
+                               "weight": 100 + (4 - wk) * 25}],
+            })
+    seed(data)
+    s = client.get("/api/state").get_json()["stats"]["strain"]
+    assert s["has_data"] is True
+    # acute 30,000 vs chronic (30,000+67,500)/4 = 24,375 → 1.23, sweet zone
+    assert s["acute_7d"] == 30000
+    assert s["acwr"] == pytest.approx(1.23, abs=0.01)
+    assert s["zone"] == "sweet"
+    assert s["monotony"] is not None
+    assert s["rising_weeks"] == 4
+    assert "deload" in s["suggestion"].lower()
+
+
 PNG_1PX = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
            "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 

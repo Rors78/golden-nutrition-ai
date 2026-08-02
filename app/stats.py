@@ -393,6 +393,69 @@ def weekly_volume(data, weeks=8):
     return out
 
 
+def training_strain(data):
+    """Volume-based training-load radar. Volume (sets×reps×weight) is the
+    load proxy — honest but blind to RPE and cardio, so treat it as a
+    compass, not a verdict.
+
+    - acwr: last-7-day volume vs the average week of the last 28 days
+      (0.8–1.3 is the classically quoted sweet spot).
+    - monotony: Foster-style mean/std of the last 7 daily loads (rest days
+      count as zero) — high means the same grind every single day.
+    - rising_weeks: consecutive week-over-week volume increases ending now.
+    """
+    daily = {}
+    cutoff = (date.today() - timedelta(days=27)).isoformat()
+    for w in data['workouts']:
+        if w['date'] >= cutoff:
+            v = sum(ex.get('sets', 0) * ex.get('reps', 0) * ex.get('weight', 0)
+                    for ex in w.get('exercises', []))
+            daily[w['date']] = daily.get(w['date'], 0) + v
+
+    week_ago = (date.today() - timedelta(days=6)).isoformat()
+    acute = sum(v for dt, v in daily.items() if dt >= week_ago)
+    prior21 = sum(v for dt, v in daily.items() if dt < week_ago)
+    if prior21 <= 0:
+        return {'has_data': False}
+    chronic = (acute + prior21) / 4
+    acwr = round(acute / chronic, 2)
+    zone = ('spike' if acwr > 1.5 else 'pushing' if acwr > 1.3 else
+            'sweet' if acwr >= 0.8 else 'easing')
+
+    loads = [daily.get((date.today() - timedelta(days=i)).isoformat(), 0)
+             for i in range(7)]
+    mean = sum(loads) / 7
+    var = sum((x - mean) ** 2 for x in loads) / 7
+    monotony = round(mean / var ** 0.5, 2) if var > 0 else None
+    strain = round(acute * monotony) if monotony else None
+
+    wv = weekly_volume(data)
+    rising = 0
+    for i in range(len(wv) - 1, 0, -1):
+        if wv[i]['volume'] > wv[i - 1]['volume'] > 0:
+            rising += 1
+        else:
+            break
+
+    suggestion = None
+    if acwr > 1.5:
+        suggestion = (f'Acute load is {acwr}× your 4-week norm — spike zone. '
+                      'Pull the next few sessions back before your joints file a complaint.')
+    elif rising >= 4:
+        suggestion = (f'{rising} straight weeks of climbing volume — bank a deload '
+                      'week: half the sets, keep the weights, come back growing.')
+    elif monotony is not None and monotony > 2.5:
+        suggestion = (f'Every day is the same grind (monotony {monotony}) — alternate '
+                      'hard and easy days; recovery lives in the contrast.')
+    elif acwr < 0.5:
+        suggestion = ('Volume has fallen well under your norm — ramp back in over a '
+                      'week or two rather than jumping straight to the old numbers.')
+
+    return {'has_data': True, 'acwr': acwr, 'zone': zone, 'monotony': monotony,
+            'strain': strain, 'rising_weeks': rising, 'acute_7d': round(acute),
+            'chronic_weekly': round(chronic), 'suggestion': suggestion}
+
+
 def training_summary(data):
     """This week's training load + consecutive-week streak (3+ sessions/week)."""
     week_ago = _week_ago()
