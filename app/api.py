@@ -8,7 +8,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request, Response
 
-from . import ai, data as store, notify, stats
+from . import ai, data as store, food_db, notify, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
 from .data import clean_num
 from .remedies_kb import kb_stats, load_kb, remedy_of_day, search_kb
@@ -196,6 +196,19 @@ def add_meal():
     d['meals'].append(meal)
     store.save(d)
     return jsonify({'ok': True})
+
+
+@bp.get('/food/barcode/<code>')
+def food_barcode(code):
+    try:
+        hit = food_db.lookup_barcode(code)
+    except ValueError as e:
+        return _err(e)
+    except Exception as e:
+        return _err(f'Barcode lookup failed: {e}', 502)
+    if not hit:
+        return _err('No product found for that barcode.', 404)
+    return jsonify(hit)
 
 
 @bp.post('/meals/repeat-yesterday')

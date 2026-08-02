@@ -121,6 +121,52 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_barcode_normalize():
+    from app.food_db import normalize
+    per_serving = {"status": 1, "product": {
+        "product_name": "Nutella", "brands": "Ferrero", "serving_size": "15 g",
+        "nutriments": {"proteins_serving": 0.9, "energy-kcal_serving": 80.7,
+                       "carbohydrates_serving": 8.6, "fat_serving": 4.7}}}
+    hit = normalize(per_serving)
+    assert hit["basis"] == "serving" and hit["brand"] == "Ferrero"
+    assert hit["macros"]["calories"] == 80.7
+    assert hit["macros"]["fiber"] == 0            # missing macro defaults to 0
+
+    per_100g = {"status": 1, "product": {
+        "product_name": "Oats",
+        "nutriments": {"proteins_100g": 13.5, "energy-kcal_100g": 379}}}
+    hit = normalize(per_100g)
+    assert hit["basis"] == "100g" and hit["macros"]["protein"] == 13.5
+
+    assert normalize({"status": 0}) is None
+    assert normalize({"status": 1, "product": {"product_name": "Mystery",
+                                               "nutriments": {}}}) is None
+
+
+def test_barcode_endpoint(client, monkeypatch):
+    from app import food_db
+    hit = {"name": "Whey Gold", "brand": "ON", "serving_size": "31 g",
+           "basis": "serving",
+           "macros": {"protein": 24, "calories": 120, "carbs": 3,
+                      "fat": 1.5, "fiber": 0}}
+    monkeypatch.setattr(food_db, "lookup_barcode", lambda code: hit)
+    r = client.get("/api/food/barcode/0748927024081")
+    assert r.status_code == 200 and r.get_json()["macros"]["protein"] == 24
+
+    monkeypatch.setattr(food_db, "lookup_barcode", lambda code: None)
+    assert client.get("/api/food/barcode/00000000").status_code == 404
+
+    def boom(code):
+        raise OSError("timed out")
+    monkeypatch.setattr(food_db, "lookup_barcode", boom)
+    assert client.get("/api/food/barcode/12345678").status_code == 502
+
+
+def test_barcode_junk_input_rejected(client):
+    # validation raises before any network I/O
+    assert client.get("/api/food/barcode/nonsense").status_code == 400
+
+
 def test_workout_split_sets_per_exercise(client):
     """Live sessions save one row per (weight, reps) group of the same
     exercise — both rows must persist and progression must merge them."""
