@@ -25,6 +25,7 @@ export function renderWeight(root, state) {
   root.append(form);
 
   renderTape(root, state);
+  renderPhotos(root, state);
 
   if (!w.has_data) {
     root.append(el('<div class="empty" style="margin-top:14px">No weigh-ins yet. Log the first one above.</div>'));
@@ -180,6 +181,89 @@ export function renderWeight(root, state) {
     });
     tr.querySelector('.danger').addEventListener('click', () => refresh());
   }
+}
+
+// Progress photos: dated timeline, tap two to compare side by side.
+// Files live in photos/ beside the data file — this machine only.
+function renderPhotos(root, state) {
+  const ph = state.photos || [];
+  const card = el(`<div class="card" style="margin-top:14px">
+    <p class="chart-title">Progress photos</p>
+    <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">Same spot, same light, same pose — monthly beats daily. Stored only on this machine (photos are not inside the JSON backup). Tap two to compare.</p>
+    <div class="form-row">
+      <button type="button" class="ghost-btn ph-add" style="flex:0 1 auto">Add photo</button>
+      <input type="file" accept="image/*" capture="environment" hidden class="ph-input">
+    </div>
+    <div class="ph-strip" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
+    <div class="ph-compare" style="display:flex;gap:10px;margin-top:12px"></div>
+  </div>`);
+
+  const input = card.querySelector('.ph-input');
+  card.querySelector('.ph-add').addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        await api('POST', '/photos', { image: reader.result });
+        toast('Photo added');
+        await refresh();
+      } catch (e) { toast(e.message); }
+      finally { input.value = ''; }
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const sel = [];
+  const strip = card.querySelector('.ph-strip');
+  const compare = card.querySelector('.ph-compare');
+  const drawCompare = () => {
+    compare.innerHTML = '';
+    for (const i of sel) {
+      const p = ph[i];
+      compare.append(el(`<figure style="flex:1;min-width:0;margin:0">
+        <img src="/api/photos/${encodeURIComponent(p.file)}" alt="progress ${esc(p.date)}" style="width:100%;border-radius:6px">
+        <figcaption style="font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-top:4px;text-align:center">${esc(p.date)}</figcaption>
+      </figure>`));
+    }
+  };
+
+  ph.forEach((p, i) => {
+    const cell = el(`<div style="position:relative">
+      <img src="/api/photos/${encodeURIComponent(p.file)}" alt="${esc(p.date)}" loading="lazy"
+        style="height:110px;border-radius:6px;cursor:pointer;border:2px solid transparent;display:block">
+      <span style="display:block;text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-top:3px">${esc(p.date)}</span>
+      <button type="button" class="icon-btn danger" title="Delete" style="position:absolute;top:2px;right:2px">✕</button>
+    </div>`);
+    cell.querySelector('img').addEventListener('click', () => {
+      const at = sel.indexOf(i);
+      if (at >= 0) sel.splice(at, 1);
+      else { sel.push(i); if (sel.length > 2) sel.shift(); }
+      [...strip.querySelectorAll('img')].forEach((im, j) => {
+        im.style.borderColor = sel.includes(j) ? 'var(--gold)' : 'transparent';
+      });
+      drawCompare();
+    });
+    cell.querySelector('button').addEventListener('click', async ev => {
+      const b = ev.target;
+      if (b.dataset.armed) {
+        try {
+          await api('DELETE', `/photos/${i}`);
+          toast('Photo deleted');
+          await refresh();
+        } catch (e) { toast(e.message); }
+        return;
+      }
+      b.dataset.armed = '1';
+      toast('Tap ✕ again to delete');
+      setTimeout(() => delete b.dataset.armed, 3000);
+    });
+    strip.append(cell);
+  });
+  if (!ph.length) strip.append(el('<div class="empty" style="flex:1">No photos yet. The first one sets the baseline.</div>'));
+
+  root.append(card);
 }
 
 const TAPE_FIELDS = [['neck_in', 'Neck'], ['chest_in', 'Chest'], ['waist_in', 'Waist'],

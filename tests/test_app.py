@@ -121,6 +121,38 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+PNG_1PX = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+           "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def test_progress_photos(client):
+    r = client.post("/api/photos", json={"image": PNG_1PX})
+    assert r.status_code == 200
+    name = r.get_json()["file"]
+    assert name.endswith(".png")
+
+    st = client.get("/api/state").get_json()
+    assert len(st["photos"]) == 1 and st["photos"][0]["file"] == name
+    assert client.get(f"/api/photos/{name}").status_code == 200
+
+    # second same-day photo gets a distinct filename
+    name2 = client.post("/api/photos", json={"image": PNG_1PX}).get_json()["file"]
+    assert name2 != name
+
+    # unknown names and non-listed files are refused
+    assert client.get("/api/photos/nope.jpg").status_code == 404
+    assert client.get("/api/photos/nutrition_data.json").status_code == 404
+    # junk payloads
+    assert client.post("/api/photos", json={"image": "hello"}).status_code == 400
+
+    # delete removes both the entry and the file
+    assert client.delete("/api/photos/0").status_code == 200
+    st = client.get("/api/state").get_json()
+    assert len(st["photos"]) == 1
+    assert client.get(f"/api/photos/{name}").status_code == 404
+    assert client.delete("/api/photos/5").status_code == 404
+
+
 def test_measurements_merge_and_body_comp(client):
     data = week_of_data()
     data["profile"]["sex"] = "male"          # height_in 70 already set

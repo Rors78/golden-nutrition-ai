@@ -8,7 +8,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request, Response
+from flask import Blueprint, jsonify, request, Response, send_from_directory
 
 from . import ai, data as store, food_db, notify, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
@@ -80,6 +80,7 @@ def get_state():
         'weights': sorted(d['weights'], key=lambda w: w['date']),
         'vitals': sorted(d.get('vitals', []), key=lambda v: v['date']),
         'measurements': sorted(d.get('measurements', []), key=lambda m: m['date']),
+        'photos': d.get('photos', []),
         'settings': d['settings'],
         'briefing': d.get('briefing'),
         'deals': d.get('deals'),
@@ -533,6 +534,64 @@ def add_weight():
     d['weights'].append({'date': day, 'weight': lbs})
     d['weights'].sort(key=lambda w: w['date'])
     d['profile']['weight'] = d['weights'][-1]['weight']
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+PHOTO_DIR = Path('photos')
+
+
+@bp.post('/photos')
+def add_photo():
+    """Store a progress photo on disk beside the data file (never uploaded
+    anywhere) and record it in the photos list."""
+    import base64
+    body = request.get_json(force=True)
+    data_url = str(body.get('image', ''))
+    if ';base64,' not in data_url:
+        return _err('Send the photo as a base64 data URL.')
+    header, b64 = data_url.split(';base64,', 1)
+    ext = '.png' if 'png' in header else '.jpg'
+    try:
+        raw = base64.b64decode(b64)
+    except Exception:
+        return _err('That image data did not decode.')
+    if len(raw) > 12 * 1024 * 1024:
+        return _err('Photo too large — keep it under 12 MB.')
+    day = str(body.get('date') or date.today().isoformat())[:10]
+    d = store.load()
+    d.setdefault('photos', [])
+    PHOTO_DIR.mkdir(exist_ok=True)
+    n = 1
+    while (PHOTO_DIR / f'{day}-{n}{ext}').exists():
+        n += 1
+    name = f'{day}-{n}{ext}'
+    (PHOTO_DIR / name).write_bytes(raw)
+    d['photos'].append({'date': day, 'file': name})
+    d['photos'].sort(key=lambda p: p['date'])
+    store.save(d)
+    return jsonify({'ok': True, 'file': name})
+
+
+@bp.get('/photos/<name>')
+def get_photo(name):
+    d = store.load()
+    if not any(p['file'] == name for p in d.get('photos', [])):
+        return _err('No such photo.', 404)
+    return send_from_directory(PHOTO_DIR.resolve(), name)
+
+
+@bp.delete('/photos/<int:idx>')
+def delete_photo(idx):
+    d = store.load()
+    photos = d.get('photos', [])
+    if not 0 <= idx < len(photos):
+        return _err('No such photo.', 404)
+    gone = photos.pop(idx)
+    try:
+        (PHOTO_DIR / gone['file']).unlink()
+    except OSError:
+        pass
     store.save(d)
     return jsonify({'ok': True})
 
