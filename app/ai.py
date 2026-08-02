@@ -65,6 +65,12 @@ def cli_available():
     return shutil.which("claude") is not None
 
 
+def _claude_exe():
+    # Windows resolves `claude` to claude.cmd, which CreateProcess won't
+    # launch by bare name — always pass the full resolved path.
+    return shutil.which("claude") or "claude"
+
+
 def backend_name():
     if cli_available():
         return "Claude Code (subscription)"
@@ -80,8 +86,9 @@ def _run_cli(prompt, timeout=300):
     env.pop("ANTHROPIC_API_KEY", None)
     env.pop("ANTHROPIC_AUTH_TOKEN", None)
     result = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "text"],
-        capture_output=True, text=True, timeout=timeout, env=env,
+        [_claude_exe(), "-p", prompt, "--output-format", "text"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=timeout, env=env,
         cwd=tempfile.gettempdir(),  # neutral cwd: no project context leaks in
     )
     if result.returncode != 0:
@@ -186,9 +193,10 @@ def find_deals(items, location=""):
         env.pop("ANTHROPIC_API_KEY", None)
         env.pop("ANTHROPIC_AUTH_TOKEN", None)
         result = subprocess.run(
-            ["claude", "-p", ask, "--output-format", "text",
+            [_claude_exe(), "-p", ask, "--output-format", "text",
              "--allowedTools", "WebSearch,WebFetch"],
-            capture_output=True, text=True, timeout=420, env=env,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=420, env=env,
             cwd=tempfile.gettempdir(),
         )
         if result.returncode != 0:
@@ -498,9 +506,10 @@ def parse_meal_photo(image_path):
         env.pop("ANTHROPIC_API_KEY", None)
         env.pop("ANTHROPIC_AUTH_TOKEN", None)
         result = subprocess.run(
-            ["claude", "-p", prompt, "--output-format", "text",
+            [_claude_exe(), "-p", prompt, "--output-format", "text",
              "--allowedTools", "Read"],
-            capture_output=True, text=True, timeout=300, env=env,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=300, env=env,
             cwd=os.path.dirname(image_path) or tempfile.gettempdir(),
         )
         if result.returncode != 0:
