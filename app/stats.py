@@ -393,6 +393,50 @@ def weekly_volume(data, weeks=8):
     return out
 
 
+def next_targets(data):
+    """Next-session load suggestions via simplified double progression.
+
+    Per exercise, compare the top set of the last two sessions: reps held or
+    beaten at the same weight (and ≥6 reps) → earn +5 lbs; reps slipped by
+    2+ → consolidate at the same weight; otherwise keep building reps.
+    Exercises untouched for 21 days are skipped — suggestions expire.
+    """
+    hist = {}
+    for w in data['workouts']:
+        for ex in w.get('exercises', []):
+            name = ex.get('exercise')
+            if not name or not ex.get('weight'):
+                continue
+            days = hist.setdefault(name, {})
+            cur = days.get(w['date'])
+            cand = (ex['weight'], ex.get('reps', 0))
+            if cur is None or cand > cur:
+                days[w['date']] = cand
+    stale = (date.today() - timedelta(days=21)).isoformat()
+    out = []
+    for name, days in hist.items():
+        seq = sorted(days.items())
+        d1, (w1, r1) = seq[-1]
+        if d1 < stale:
+            continue
+        prev = seq[-2][1] if len(seq) >= 2 else None
+        if prev and prev[0] == w1 and r1 >= prev[1] and r1 >= 6:
+            action, nxt = 'increase', w1 + 5
+            why = (f'Held {w1} lbs for {prev[1]}→{r1} reps across two sessions '
+                   '— earn the next plate.')
+        elif prev and prev[0] == w1 and r1 <= prev[1] - 2:
+            action, nxt = 'hold', w1
+            why = f'Reps slipped {prev[1]}→{r1} at {w1} lbs — consolidate before adding.'
+        else:
+            action, nxt = 'build', w1
+            why = f'Build reps at {w1} lbs before adding weight.'
+        out.append({'exercise': name, 'last_weight': w1, 'last_reps': r1,
+                    'last_date': d1, 'action': action, 'next_weight': nxt,
+                    'why': why})
+    out.sort(key=lambda x: x['last_date'], reverse=True)
+    return out
+
+
 def energy_balance(data):
     """Adaptive TDEE from the last 21 days of weigh-ins + logged calories.
 
