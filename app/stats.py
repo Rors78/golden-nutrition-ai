@@ -393,6 +393,58 @@ def weekly_volume(data, weeks=8):
     return out
 
 
+def energy_balance(data):
+    """Adaptive TDEE from the last 21 days of weigh-ins + logged calories.
+
+    Energy-balance identity: TDEE ≈ average intake − weekly weight slope ×
+    3500/7. Only days with ≥800 logged calories count as logged — partial
+    days would bias the estimate down. Needs ≥10 logged days and ≥8
+    weigh-ins spanning two weeks; below that, honest silence beats a wrong
+    number.
+    """
+    cutoff = (date.today() - timedelta(days=20)).isoformat()
+    weights = sorted((w for w in data['weights'] if w['date'] >= cutoff),
+                     key=lambda w: w['date'])
+    by_day = {}
+    for m in data['meals']:
+        if m['date'] >= cutoff:
+            by_day[m['date']] = by_day.get(m['date'], 0) + (m.get('calories') or 0)
+    logged = [v for v in by_day.values() if v >= 800]
+    span = ((date.fromisoformat(weights[-1]['date'])
+             - date.fromisoformat(weights[0]['date'])).days
+            if len(weights) >= 2 else 0)
+    if len(logged) < 10 or len(weights) < 8 or span < 13:
+        return {'has_data': False,
+                'note': 'Needs ~2 weeks of daily weigh-ins and complete food logs.'}
+
+    avg_intake = sum(logged) / len(logged)
+    xs = [date.fromisoformat(w['date']).toordinal() for w in weights]
+    ys = [w['weight'] for w in weights]
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    slope = (sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+             / sum((x - mx) ** 2 for x in xs))          # lbs/day
+    rate_wk = round(slope * 7, 2)
+    tdee = avg_intake - rate_wk * 500                    # 3500 kcal/lb ÷ 7
+
+    goal, cur = data['profile'].get('goal_weight') or 0, ys[-1]
+    target_rate = (-1.0 if goal and goal < cur - 1 else
+                   0.5 if goal and goal > cur + 1 else 0.0)
+    rec = int(round((tdee + target_rate * 500) / 25) * 25)
+    current_goal = data['profile'].get('daily_calories') or 0
+    confidence = ('high' if len(logged) >= 17 and len(weights) >= 15 else
+                  'medium' if len(logged) >= 12 and len(weights) >= 10 else 'low')
+    return {'has_data': True,
+            'tdee': int(round(tdee / 25) * 25),
+            'avg_intake': round(avg_intake),
+            'rate_wk': rate_wk,
+            'logged_days': len(logged), 'weigh_ins': len(weights),
+            'target_rate': target_rate,
+            'recommended_calories': rec,
+            'current_goal': current_goal, 'delta': rec - current_goal,
+            'confidence': confidence}
+
+
 def training_strain(data):
     """Volume-based training-load radar. Volume (sets×reps×weight) is the
     load proxy — honest but blind to RPE and cardio, so treat it as a

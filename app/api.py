@@ -104,6 +104,7 @@ def get_state():
             'weight_extras': stats.weight_extras(d),
             'body_comp': stats.body_comp(d),
             'strain': stats.training_strain(d),
+            'energy': stats.energy_balance(d),
             'insights': stats.insights(d),
             'progression': stats.progression(d),
             'quick_meals': stats.quick_meals(d),
@@ -147,6 +148,18 @@ def save_profile():
         'notes': str(body.get('notes', '')),
         'coach': d['profile'].get('coach', DEFAULT_COACH),
     }
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.post('/profile/calorie-goal')
+def set_calorie_goal():
+    """One-tap adoption of the adaptive-TDEE calorie recommendation."""
+    cal = clean_num(request.get_json(force=True).get('calories'))
+    if not 1000 <= cal <= 6000:
+        return _err('Calorie goal must be between 1000 and 6000.')
+    d = store.load()
+    d['profile']['daily_calories'] = cal
     store.save(d)
     return jsonify({'ok': True})
 
@@ -520,6 +533,7 @@ def briefing():
         'tape_latest': (sorted(d.get('measurements', []), key=lambda m: m['date'])[-1]
                         if d.get('measurements') else None),
         'training_strain': stats.training_strain(d),
+        'energy_balance': stats.energy_balance(d),
     })
     try:
         text = ai.daily_briefing(d['profile'], persona_prompt(coach), context)
@@ -1018,6 +1032,7 @@ def coach():
         'recent_prs': stats.recent_prs(d),
         'readiness': stats.readiness(d),
         'training_strain': stats.training_strain(d),
+        'energy_balance': stats.energy_balance(d),
     }
     if not week_data['meals'] and not week_data['workouts']:
         return _err("Log some meals or workouts first — there's nothing from the last 7 days to review.")

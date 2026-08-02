@@ -121,6 +121,39 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_energy_balance_adaptive_tdee(client):
+    # ~1 week of data → honest silence
+    seed(week_of_data())
+    e = client.get("/api/state").get_json()["stats"]["energy"]
+    assert e["has_data"] is False
+
+    # 21 days: 2000 cal/day logged, weight sliding 200 → 197 (~-1.05 lb/wk)
+    data = week_of_data()
+    data["meals"], data["weights"] = [], []
+    for i in range(21):
+        day = (date.today() - timedelta(days=i)).isoformat()
+        data["meals"].append({"date": day, "time": "12:00", "name": "Day food",
+                              "protein": 150, "calories": 2000, "carbs": 150,
+                              "fat": 60, "fiber": 20, "notes": ""})
+        data["weights"].append({"date": day, "weight": 197 + 3 * i / 20})
+    seed(data)   # profile: goal_weight 185 (cutting), daily_calories 2200
+    e = client.get("/api/state").get_json()["stats"]["energy"]
+    assert e["has_data"] is True
+    assert e["rate_wk"] == pytest.approx(-1.05, abs=0.01)
+    # TDEE = 2000 + 1.05*500 = 2525; cutting at -1 lb/wk → 2025
+    assert e["tdee"] == 2525
+    assert e["recommended_calories"] == 2025
+    assert e["delta"] == 2025 - 2200
+    assert e["confidence"] == "high"
+
+    # one-tap adoption
+    r = client.post("/api/profile/calorie-goal", json={"calories": 2025})
+    assert r.status_code == 200
+    assert client.get("/api/state").get_json()["profile"]["daily_calories"] == 2025
+    assert client.post("/api/profile/calorie-goal",
+                       json={"calories": 200}).status_code == 400
+
+
 def test_training_strain(client):
     # ~1 week of history only → no chronic baseline, radar stays silent
     seed(week_of_data())

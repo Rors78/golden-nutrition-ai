@@ -78,6 +78,43 @@ export function renderMeals(root, state) {
       CHART.config);
   }
 
+  // ── adaptive TDEE — the app's real read on your metabolism ──
+  const en = state.stats.energy;
+  if (en?.has_data) {
+    const dir = en.target_rate < 0 ? 'lose' : en.target_rate > 0 ? 'gain' : 'hold';
+    const eCard = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Metabolism — adaptive TDEE <span style="font-size:11px;color:var(--muted);font-weight:400">confidence: ${en.confidence}</span></p>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 0">Estimated from ${en.logged_days} fully-logged days and ${en.weigh_ins} weigh-ins over three weeks — your measured burn, not a formula guess.</p>
+      <div class="cards metrics" style="margin-top:10px"></div>
+      <div class="eb-advice"></div>
+    </div>`);
+    eCard.querySelector('.cards').append(
+      metric('TDEE', en.tdee, { small: 'est. maintenance' }),
+      metric('Avg intake', en.avg_intake, { small: `${en.logged_days} logged days` }),
+      metric('Weight trend', `${en.rate_wk > 0 ? '+' : ''}${en.rate_wk}`, { suffix: ' lbs/wk', small: '21-day slope' }),
+      metric('Suggested cals', en.recommended_calories,
+        { small: en.target_rate ? `to ${dir} ${Math.abs(en.target_rate)} lb/wk` : 'to hold steady' }),
+    );
+    const adv = eCard.querySelector('.eb-advice');
+    if (Math.abs(en.delta) >= 100) {
+      const row = el(`<div class="callout ${en.delta > 0 ? 'good' : 'warn'}" style="margin-top:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <span style="flex:1;min-width:220px">Your goal is set to ${en.current_goal}, but the math says <strong>${en.recommended_calories}</strong>${en.delta > 0 ? ' — you can eat more and still hit pace.' : ' — tighten up to hit pace.'}</span>
+        <button type="button" class="gold-btn" style="flex:0 1 auto;min-height:36px;padding:8px 16px;font-size:13px">Set ${en.recommended_calories} as my goal</button>
+      </div>`);
+      row.querySelector('button').addEventListener('click', async () => {
+        try {
+          await api('POST', '/profile/calorie-goal', { calories: en.recommended_calories });
+          toast(`Calorie goal set to ${en.recommended_calories}`);
+          await refresh();
+        } catch (e) { toast(e.message); }
+      });
+      adv.append(row);
+    } else {
+      adv.append(el('<div class="callout good" style="margin-top:10px">Your calorie goal already matches the math. Keep logging — the estimate sharpens with every day.</div>'));
+    }
+    root.append(eCard);
+  }
+
   // ── AI quick log ──
   const aiCard = el(`<div class="card">
     <p class="chart-title">AI quick log ${state.ai_backend ? `· ${esc(state.ai_backend)}` : ''}</p>
