@@ -1,10 +1,45 @@
-// Workouts: weekly training load, coach-plan loading, structured logging with
-// last-time hints + PR detection, rest timer, progression charts, history.
+// Workouts: live set-by-set sessions with auto rest timer, weekly training
+// load, coach-plan loading, structured logging with last-time hints + PR
+// detection, rest timer, progression charts, history.
 import { el, esc, api, toast, refresh, metric, rowActions, CHART } from '../app.js';
 
 const TYPES = ['Push Day A (Cutler Mode)', 'Pull Day A (Cutler Mode)', 'Leg Day A (Cutler Mode)',
   'Push Day B', 'Pull Day B', 'Leg Day B', 'Cardio', 'Custom'];
 const INTENSITIES = ['Light', 'Moderate', 'Hard', 'Very Hard'];
+
+// Cutler Mode A-day templates for one-tap live sessions (mirrors the README).
+const CUTLER_TEMPLATES = {
+  'Push Day A (Cutler Mode)': [
+    ['Incline Dumbbell Press', 4, 10], ['Overhead Shoulder Press', 4, 12],
+    ['Rope Triceps Extensions', 3, 15], ['Side Laterals', 3, 12], ['Cable Flys', 3, 12]],
+  'Pull Day A (Cutler Mode)': [
+    ['Barbell Rows', 4, 10], ['Lat Pulldowns', 4, 12], ['Face Pulls', 3, 15],
+    ['Hammer Curls', 3, 12], ['Cable Curls', 3, 12]],
+  'Leg Day A (Cutler Mode)': [
+    ['Squats', 4, 10], ['Romanian Deadlifts', 4, 10], ['Leg Press', 3, 15],
+    ['Leg Curls', 3, 12], ['Calf Raises', 4, 15]],
+};
+
+// Live session survives refreshes/phone sleep via localStorage.
+const LIVE_KEY = 'gna-live-session';
+const loadLive = () => { try { return JSON.parse(localStorage.getItem(LIVE_KEY)); } catch { return null; } };
+const saveLive = s => localStorage.setItem(LIVE_KEY, JSON.stringify(s));
+const clearLive = () => localStorage.removeItem(LIVE_KEY);
+
+const fmtClock = sec => sec >= 3600
+  ? `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`
+  : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 880; gain.gain.value = 0.08;
+    osc.start(); osc.stop(ctx.currentTime + 0.35);
+  } catch { /* no audio available */ }
+  if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
+}
 
 // "Incline Dumbbell Press: 4×10 @ 70 lbs" → {exercise, sets, reps, weight}
 function parsePlanLine(line) {
@@ -21,6 +56,192 @@ export function renderWorkouts(root, state) {
 
   const progression = state.stats.progression;
   const knownNames = Object.keys(progression).sort();
+
+  const week = state.plan?.plan?.week || [];
+  const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  const planDay = week.find(d => (d.day || '').toLowerCase().includes(todayName.toLowerCase()));
+
+  // ── live session — set-by-set logging, elapsed clock, auto rest timer ──
+  const prevTopOf = name => {
+    const s = progression[String(name || '').trim()];
+    return s?.length ? Math.max(...s.map(x => x.top)) : 0;
+  };
+  const liveWrap = el('<div class="live-wrap"></div>');
+  root.append(liveWrap);
+
+  function startSession(name, exList) {
+    saveLive({
+      name, startedAt: Date.now(), rest: 90, restEndsAt: null,
+      exercises: exList.map(x => ({
+        name: x.exercise, targetSets: x.sets || 0, targetReps: x.reps || 0,
+        targetWeight: x.weight || 0, sets: [],
+      })),
+    });
+    drawLive();
+  }
+
+  function drawStart() {
+    const card = el(`<div class="card">
+      <p class="chart-title">Live session</p>
+      <p style="color:var(--muted);font-size:12px;margin:6px 0 10px">Train with the clock running — log each set as you rack it, and the rest timer starts itself. A session in progress survives refreshes.</p>
+      <div class="form-row" style="align-items:flex-end">
+        ${planDay ? `<button type="button" class="gold-btn lv-plan" style="flex:0 1 auto;min-height:38px;padding:8px 16px;font-size:13px">Start today's plan — ${esc(planDay.title)}</button>` : ''}
+        <label style="flex:0 1 260px">Template <select class="lv-tpl">
+          ${Object.keys(CUTLER_TEMPLATES).map(t => `<option>${t}</option>`).join('')}
+          <option>Empty session</option></select></label>
+        <button type="button" class="ghost-btn lv-go" style="flex:0 1 auto;min-height:38px;padding:8px 16px">Start</button>
+      </div></div>`);
+    card.querySelector('.lv-plan')?.addEventListener('click', () => {
+      const exs = planDay.details.map(parsePlanLine).filter(Boolean);
+      startSession((planDay.title || 'Custom').slice(0, 60), exs);
+    });
+    card.querySelector('.lv-go').addEventListener('click', () => {
+      const tpl = card.querySelector('.lv-tpl').value;
+      const exs = (CUTLER_TEMPLATES[tpl] || []).map(([n, s2, r]) => ({ exercise: n, sets: s2, reps: r }));
+      startSession(tpl === 'Empty session' ? 'Custom' : tpl, exs);
+    });
+    liveWrap.append(card);
+  }
+
+  function drawSession(s) {
+    const panel = el(`<div class="panel" style="border:1px solid var(--gold)">
+      <div class="form-row" style="align-items:center">
+        <span class="chart-title" style="margin:0;flex:1;min-width:160px">LIVE — ${esc(s.name)}</span>
+        <span class="lv-elapsed" style="font-family:var(--font-mono);font-size:22px;font-weight:700"></span>
+        <span class="lv-rest" style="font-family:var(--font-mono);font-size:14px;color:var(--gold-bright);min-width:88px;text-align:right"></span>
+        <label style="flex:0 1 110px">Rest <select class="lv-rest-sel">
+          ${[60, 90, 120, 180].map(x => `<option value="${x}"${x === s.rest ? ' selected' : ''}>${fmtClock(x)}</option>`).join('')}
+        </select></label>
+        <button type="button" class="gold-btn lv-finish" style="flex:0 1 auto;min-height:38px;padding:8px 16px">Finish &amp; save</button>
+        <button type="button" class="ghost-btn lv-discard" style="flex:0 1 auto;min-height:38px;padding:8px 12px">Discard</button>
+      </div>
+      <div class="lv-exs" style="display:grid;gap:10px;margin-top:12px"></div>
+      <div class="form-row" style="margin-top:10px">
+        <label style="flex:2 1 200px">Add exercise <input class="lv-add-name" type="text" list="exercise-names" placeholder="Cable Flys"></label>
+        <button type="button" class="ghost-btn lv-add" style="flex:0 1 auto;min-height:38px;padding:8px 14px">Add</button>
+      </div></div>`);
+
+    const exsBox = panel.querySelector('.lv-exs');
+    s.exercises.forEach((ex, i) => {
+      const prevTop = prevTopOf(ex.name);
+      const lastSet = ex.sets[ex.sets.length - 1];
+      const done = ex.targetSets && ex.sets.length >= ex.targetSets;
+      const chips = ex.sets.map(t =>
+        `<span style="font-family:var(--font-mono);font-size:12px;padding:2px 8px;border-radius:3px;background:var(--bg);${prevTop && t.w > prevTop ? 'color:var(--gold-bright);font-weight:700' : 'color:var(--ink-2)'}">${t.w}×${t.r}${prevTop && t.w > prevTop ? ' PR' : ''}</span>`).join('');
+      exsBox.append(el(`<div style="border-left:3px solid ${done ? 'var(--good)' : 'var(--steel)'};padding:6px 12px;display:grid;gap:6px">
+        <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <strong style="font-size:14px">${esc(ex.name)}</strong>
+          ${ex.targetSets ? `<span style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">target ${ex.targetSets}×${ex.targetReps}</span>` : ''}
+          ${prevTop ? `<span style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">PR ${prevTop} lbs</span>` : ''}
+          <span style="display:flex;gap:6px;flex-wrap:wrap">${chips}</span>
+        </div>
+        <div class="form-row" style="align-items:flex-end">
+          <label style="flex:0 1 130px">Weight <input data-f="w" type="number" min="0" step="2.5" value="${lastSet ? lastSet.w : (ex.targetWeight || prevTop || 0)}"></label>
+          <label style="flex:0 1 110px">Reps <input data-f="r" type="number" min="1" value="${lastSet ? lastSet.r : (ex.targetReps || 10)}"></label>
+          <button type="button" class="gold-btn lv-log" data-i="${i}" style="flex:0 1 auto;min-height:38px;padding:8px 16px">Log set ${ex.sets.length + 1}</button>
+          ${ex.sets.length ? '' : `<button type="button" class="icon-btn danger lv-rm" data-i="${i}" title="Remove" style="flex:0">✕</button>`}
+        </div>
+      </div>`));
+    });
+    if (!s.exercises.length) exsBox.append(el('<div class="empty">Add your first exercise below.</div>'));
+
+    panel.addEventListener('click', ev => {
+      const log = ev.target.closest('.lv-log');
+      if (log) {
+        const i = Number(log.dataset.i);
+        const row = log.closest('.form-row');
+        const w = Number(row.querySelector('[data-f="w"]').value) || 0;
+        const r = Number(row.querySelector('[data-f="r"]').value) || 0;
+        if (r <= 0) { toast('Reps first.'); return; }
+        const ex = s.exercises[i];
+        const prevTop = prevTopOf(ex.name);
+        ex.sets.push({ w, r });
+        s.restEndsAt = Date.now() + s.rest * 1000;
+        saveLive(s);
+        if (prevTop && w > prevTop) toast(`NEW PR — ${ex.name} @ ${w} lbs`);
+        drawLive();
+        return;
+      }
+      const rm = ev.target.closest('.lv-rm');
+      if (rm) { s.exercises.splice(Number(rm.dataset.i), 1); saveLive(s); drawLive(); }
+    });
+
+    panel.querySelector('.lv-rest-sel').addEventListener('change', ev => {
+      s.rest = Number(ev.target.value); saveLive(s);
+    });
+
+    panel.querySelector('.lv-add').addEventListener('click', () => {
+      const name = panel.querySelector('.lv-add-name').value.trim();
+      if (!name) return;
+      s.exercises.push({ name, targetSets: 0, targetReps: 0, targetWeight: 0, sets: [] });
+      saveLive(s); drawLive();
+    });
+
+    panel.querySelector('.lv-discard').addEventListener('click', ev => {
+      if (ev.target.dataset.armed) { clearLive(); drawLive(); toast('Session discarded'); return; }
+      ev.target.dataset.armed = '1'; ev.target.textContent = 'Really discard?';
+      setTimeout(() => { delete ev.target.dataset.armed; ev.target.textContent = 'Discard'; }, 4000);
+    });
+
+    panel.querySelector('.lv-finish').addEventListener('click', () => finishSession(s));
+
+    liveWrap.append(panel);
+    const elapsedEl = panel.querySelector('.lv-elapsed');
+    const restEl = panel.querySelector('.lv-rest');
+    let wasConnected = false;
+    const tick = () => {
+      // Kill the interval only after the panel has been mounted then replaced
+      // (a re-render) — never on early ticks while the section is still mounting.
+      if (panel.isConnected) wasConnected = true;
+      else { if (wasConnected) clearInterval(iv); return; }
+      elapsedEl.textContent = fmtClock(Math.max(0, Math.floor((Date.now() - s.startedAt) / 1000)));
+      if (s.restEndsAt) {
+        const left = Math.ceil((s.restEndsAt - Date.now()) / 1000);
+        if (left <= 0) {
+          s.restEndsAt = null; saveLive(s); restEl.textContent = '';
+          beep(); toast('Rest over — back under the bar');
+        } else restEl.textContent = `REST ${fmtClock(left)}`;
+      } else restEl.textContent = '';
+    };
+    const iv = setInterval(tick, 1000);
+    tick();
+  }
+
+  async function finishSession(s) {
+    // One row per (exercise, weight, reps) group — progression stats merge
+    // same-day rows, so nothing is lost.
+    const grouped = [];
+    for (const ex of s.exercises) for (const t of ex.sets) {
+      const g = grouped.find(x => x.exercise === ex.name && x.weight === t.w && x.reps === t.r);
+      if (g) g.sets += 1;
+      else grouped.push({ exercise: ex.name, sets: 1, reps: t.r, weight: t.w });
+    }
+    if (!grouped.length) { toast('Log at least one set first.'); return; }
+    const maxW = {};
+    for (const g of grouped) maxW[g.exercise] = Math.max(maxW[g.exercise] || 0, g.weight);
+    const prs = Object.entries(maxW)
+      .filter(([name, w]) => { const pt = prevTopOf(name); return pt && w > pt; })
+      .map(([name, w]) => `${name} @ ${w} lbs`);
+    const started = new Date(s.startedAt);
+    try {
+      await api('POST', '/workouts', {
+        date: started.toISOString().slice(0, 10),
+        time: started.toTimeString().slice(0, 5),
+        name: s.name, duration: Math.max(1, Math.round((Date.now() - s.startedAt) / 60000)),
+        intensity: 'Hard', notes: 'Live session', exercises: grouped,
+      });
+      clearLive();
+      toast(prs.length ? `Session saved — NEW PR: ${prs.join(', ')}` : 'Session saved');
+      await refresh();
+    } catch (err) { toast(err.message); }
+  }
+
+  function drawLive() {
+    liveWrap.innerHTML = '';
+    const s = loadLive();
+    if (s) drawSession(s); else drawStart();
+  }
+  drawLive();
 
   // ── weekly training load ──
   const tr = state.stats.training;
@@ -148,9 +369,6 @@ export function renderWorkouts(root, state) {
   root.append(el(`<datalist id="exercise-names">${knownNames.map(n => `<option value="${esc(n)}">`).join('')}</datalist>`));
 
   // ── load today's coach plan into the form ──
-  const week = state.plan?.plan?.week || [];
-  const todayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-  const planDay = week.find(d => (d.day || '').toLowerCase().includes(todayName.toLowerCase()));
   if (planDay) {
     const coach = (state.coaches || []).find(c => c.id === state.plan.coach);
     const slot = form.querySelector('.plan-load-slot');
@@ -220,16 +438,6 @@ export function renderWorkouts(root, state) {
   const draw = () => {
     display.textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
     display.style.color = remaining === 0 ? 'var(--good)' : remaining <= 5 ? 'var(--gold-bright)' : '';
-  };
-  const beep = () => {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator(), gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.frequency.value = 880; gain.gain.value = 0.08;
-      osc.start(); osc.stop(ctx.currentTime + 0.35);
-    } catch { /* no audio available */ }
-    if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
   };
   const stopTick = () => { clearInterval(ticking); ticking = null; timer.querySelector('.rt-start').textContent = 'Start'; };
   timer.querySelectorAll('.rt-preset').forEach(b => b.addEventListener('click', () => {

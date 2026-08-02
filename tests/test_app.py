@@ -121,6 +121,23 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_workout_split_sets_per_exercise(client):
+    """Live sessions save one row per (weight, reps) group of the same
+    exercise — both rows must persist and progression must merge them."""
+    today = date.today().isoformat()
+    _log_workout(client, today, [
+        {"exercise": "Squats", "sets": 3, "reps": 10, "weight": 185},
+        {"exercise": "Squats", "sets": 1, "reps": 8, "weight": 205},
+    ])
+    state = client.get("/api/state").get_json()
+    rows = state["workouts"][-1]["exercises"]
+    assert [r["weight"] for r in rows] == [185, 205]
+    day = next(p for p in state["stats"]["progression"]["Squats"]
+               if p["date"] == today)
+    assert day["top"] == 205
+    assert day["volume"] == 3 * 10 * 185 + 1 * 8 * 205
+
+
 def test_muscle_balance_and_weekly_volume(client):
     today = date.today().isoformat()
     _log_workout(client, today, [
