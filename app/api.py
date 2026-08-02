@@ -18,7 +18,10 @@ from .supplement_kb import KB
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 
-EDITABLE_KINDS = ('meals', 'workouts', 'supplements', 'weights', 'vitals')
+EDITABLE_KINDS = ('meals', 'workouts', 'supplements', 'weights', 'vitals',
+                  'measurements')
+
+MEASURE_FIELDS = ('neck_in', 'chest_in', 'waist_in', 'hips_in', 'arm_in', 'thigh_in')
 
 
 def _err(message, status=400):
@@ -76,6 +79,7 @@ def get_state():
         'schedule': d['supplement_schedule'],
         'weights': sorted(d['weights'], key=lambda w: w['date']),
         'vitals': sorted(d.get('vitals', []), key=lambda v: v['date']),
+        'measurements': sorted(d.get('measurements', []), key=lambda m: m['date']),
         'settings': d['settings'],
         'briefing': d.get('briefing'),
         'deals': d.get('deals'),
@@ -97,6 +101,7 @@ def get_state():
             'today': stats.today_summary(d),
             'weight': stats.weight_stats(d),
             'weight_extras': stats.weight_extras(d),
+            'body_comp': stats.body_comp(d),
             'insights': stats.insights(d),
             'progression': stats.progression(d),
             'quick_meals': stats.quick_meals(d),
@@ -528,6 +533,31 @@ def add_weight():
     d['weights'].append({'date': day, 'weight': lbs})
     d['weights'].sort(key=lambda w: w['date'])
     d['profile']['weight'] = d['weights'][-1]['weight']
+    store.save(d)
+    return jsonify({'ok': True})
+
+
+@bp.post('/measurements')
+def add_measurement():
+    body = request.get_json(force=True)
+    day = str(body.get('date') or date.today().isoformat())[:10]
+    row = {'date': day}
+    for f in MEASURE_FIELDS:
+        if body.get(f) not in (None, ''):
+            val = clean_num(body[f], float)
+            if val > 0:
+                row[f] = val
+    if len(row) == 1:
+        return _err('Enter at least one measurement.')
+    d = store.load()
+    d.setdefault('measurements', [])
+    for m in d['measurements']:
+        if m['date'] == day:
+            m.update({k: v for k, v in row.items() if k != 'date'})
+            break
+    else:
+        d['measurements'].append(row)
+    d['measurements'].sort(key=lambda m: m['date'])
     store.save(d)
     return jsonify({'ok': True})
 

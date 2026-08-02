@@ -1,4 +1,5 @@
 """Computed stats served to the frontend: totals, trends, insights, progression."""
+import math
 import re
 from datetime import date, datetime, timedelta
 
@@ -234,6 +235,49 @@ def insights(data):
         'verdict': verdict,
         'workout_count': len(workouts),
         'missed_supps': [s for s in supps if not s.get('taken', True)],
+    }
+
+
+def body_comp(data):
+    """US Navy tape-formula body-fat estimates from measurements + profile.
+
+    Needs height (profile), sex (picks the formula), waist + neck per row —
+    plus hips for the female formula. Rows missing inputs are skipped;
+    implausible results (outside 2–60%) are dropped rather than shown.
+    """
+    p = data['profile']
+    height = p.get('height_in') or 0
+    sex = (p.get('sex') or '').lower()
+    rows = sorted(data.get('measurements', []), key=lambda m: m['date'])
+    series = []
+    for m in rows:
+        waist, neck, hips = m.get('waist_in'), m.get('neck_in'), m.get('hips_in')
+        bf = None
+        if height > 0 and waist and neck:
+            if sex == 'male' and waist - neck > 0:
+                bf = (86.010 * math.log10(waist - neck)
+                      - 70.041 * math.log10(height) + 36.76)
+            elif sex == 'female' and hips and waist + hips - neck > 0:
+                bf = (163.205 * math.log10(waist + hips - neck)
+                      - 97.684 * math.log10(height) - 78.387)
+        if bf is not None and 2 <= bf <= 60:
+            series.append({'date': m['date'], 'bf': round(bf, 1)})
+    hint = None
+    if rows and not series:
+        if not height:
+            hint = 'Add your height in Profile to unlock body-fat estimates.'
+        elif sex not in ('male', 'female'):
+            hint = 'Set sex in Profile to pick the right body-fat formula.'
+        else:
+            hint = ('Log waist and neck (plus hips for the female formula) '
+                    'to estimate body fat.')
+    return {
+        'series': series,
+        'current': series[-1]['bf'] if series else None,
+        'change': (round(series[-1]['bf'] - series[0]['bf'], 1)
+                   if len(series) >= 2 else None),
+        'hint': hint,
+        'method': 'US Navy tape formula',
     }
 
 

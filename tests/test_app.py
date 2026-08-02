@@ -121,6 +121,51 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_measurements_merge_and_body_comp(client):
+    data = week_of_data()
+    data["profile"]["sex"] = "male"          # height_in 70 already set
+    seed(data)
+    today = date.today().isoformat()
+    yday = (date.today() - timedelta(days=1)).isoformat()
+
+    r = client.post("/api/measurements", json={"date": yday, "waist_in": 34.5,
+                                               "neck_in": 15})
+    assert r.status_code == 200
+    client.post("/api/measurements", json={"date": yday, "chest_in": 42})
+    st = client.get("/api/state").get_json()
+    assert len(st["measurements"]) == 1      # same date merged, not duplicated
+    assert st["measurements"][0]["waist_in"] == 34.5
+    assert st["measurements"][0]["chest_in"] == 42
+
+    client.post("/api/measurements", json={"date": today, "waist_in": 34,
+                                           "neck_in": 15})
+    bc = client.get("/api/state").get_json()["stats"]["body_comp"]
+    # Navy male, waist 34 / neck 15 / height 70 → ~17.5%
+    assert bc["current"] == pytest.approx(17.5, abs=0.1)
+    assert len(bc["series"]) == 2
+    assert bc["change"] < 0                  # waist came down
+
+    assert client.post("/api/measurements", json={"date": today}).status_code == 400
+    assert client.get("/api/export/measurements.csv").status_code == 200
+
+
+def test_body_comp_female_and_hints():
+    from app.stats import body_comp
+    base = {"profile": {"height_in": 65, "sex": "female"},
+            "measurements": [{"date": "2026-08-01", "waist_in": 30,
+                              "neck_in": 13, "hips_in": 38}]}
+    bf = body_comp(base)["series"][0]["bf"]
+    assert 28.4 <= bf <= 28.7                # Navy female formula
+
+    no_height = {"profile": {"height_in": 0, "sex": "male"},
+                 "measurements": [{"date": "2026-08-01", "waist_in": 34, "neck_in": 15}]}
+    assert "height" in body_comp(no_height)["hint"]
+
+    no_sex = {"profile": {"height_in": 70, "sex": ""},
+              "measurements": [{"date": "2026-08-01", "waist_in": 34, "neck_in": 15}]}
+    assert "sex" in body_comp(no_sex)["hint"].lower()
+
+
 def test_system_pulse(client):
     from pathlib import Path
     seed(week_of_data())
