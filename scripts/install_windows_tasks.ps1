@@ -2,9 +2,10 @@
 Install the Golden Nutrition AI scheduled jobs on Windows - parity with the
 systemd user timers used on Linux:
 
-    Backup      03:30 daily   scripts/backup_data.py     (14 snapshots kept)
-    Briefing    07:00 daily   scripts/daily_briefing.py  (morning coach push)
-    PriceWatch  09:00 daily   scripts/price_watch.py     (deal drop alerts)
+    Backup       03:30 daily       scripts/backup_data.py     (14 snapshots kept)
+    Briefing     07:00 daily       scripts/daily_briefing.py  (morning coach push)
+    PriceWatch   09:00 daily       scripts/price_watch.py     (deal drop alerts)
+    WeeklyReview 18:00 Sundays     scripts/weekly_review.py   (coaching review push)
 
 Usage (from anywhere):
     powershell -ExecutionPolicy Bypass -File scripts\install_windows_tasks.ps1
@@ -30,7 +31,7 @@ $jobs = @(
 )
 
 if ($Uninstall) {
-    foreach ($name in @('Backup', 'Briefing', 'PriceWatch', 'Server')) {
+    foreach ($name in @('Backup', 'Briefing', 'PriceWatch', 'WeeklyReview', 'Server')) {
         try {
             Unregister-ScheduledTask -TaskName $name -TaskPath $TaskPath -Confirm:$false -ErrorAction Stop
             Write-Host "Removed $TaskPath$name"
@@ -59,6 +60,14 @@ foreach ($j in $jobs) {
         -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
     Write-Host "Installed $TaskPath$($j.Name) - daily at $($j.At)"
 }
+
+$action = New-ScheduledTaskAction -Execute $Python `
+    -Argument ('"{0}"' -f (Join-Path $Repo 'scripts\weekly_review.py')) `
+    -WorkingDirectory $Repo
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '18:00'
+Register-ScheduledTask -TaskName 'WeeklyReview' -TaskPath $TaskPath `
+    -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+Write-Host "Installed ${TaskPath}WeeklyReview - Sundays at 18:00"
 
 if ($StartAtLogon) {
     $action = New-ScheduledTaskAction -Execute $Python `
