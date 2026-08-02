@@ -1,5 +1,5 @@
 <#
-Install the Golden Nutrition AI scheduled jobs on Windows — parity with the
+Install the Golden Nutrition AI scheduled jobs on Windows - parity with the
 systemd user timers used on Linux:
 
     Backup      03:30 daily   scripts/backup_data.py     (14 snapshots kept)
@@ -41,7 +41,7 @@ if ($Uninstall) {
 }
 
 if (-not (Test-Path $Python)) {
-    throw ("venv python not found at $Python — create it first:`n" +
+    throw ("venv python not found at $Python - create it first:`n" +
            '    python -m venv venv; venv\Scripts\pip install -r requirements.txt')
 }
 
@@ -57,7 +57,7 @@ foreach ($j in $jobs) {
     $trigger = New-ScheduledTaskTrigger -Daily -At $j.At
     Register-ScheduledTask -TaskName $j.Name -TaskPath $TaskPath `
         -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-    Write-Host "Installed $TaskPath$($j.Name) — daily at $($j.At)"
+    Write-Host "Installed $TaskPath$($j.Name) - daily at $($j.At)"
 }
 
 if ($StartAtLogon) {
@@ -69,7 +69,7 @@ if ($StartAtLogon) {
         -ExecutionTimeLimit ([TimeSpan]::Zero)   # no time limit: it's a server
     Register-ScheduledTask -TaskName 'Server' -TaskPath $TaskPath `
         -Action $action -Trigger $trigger -Settings $srvSettings -Force | Out-Null
-    Write-Host "Installed ${TaskPath}Server — app on http://localhost:8501 at every logon"
+    Write-Host "Installed ${TaskPath}Server - app on http://localhost:8501 at every logon"
 }
 
 Write-Host 'All set. Inspect with: Get-ScheduledTask -TaskPath \GoldenNutritionAI\'

@@ -1,5 +1,5 @@
 <#
-Put the app on your private Tailscale network with HTTPS — the safe way to
+Put the app on your private Tailscale network with HTTPS - the safe way to
 reach it from your phone anywhere, without exposing anything to the internet.
 Windows port of setup_remote_access.sh.
 
@@ -9,7 +9,7 @@ What this does:
   1. Installs Tailscale via winget if missing.
   2. Brings this machine onto your tailnet (opens a browser login once).
   3. Runs `tailscale serve` so https://<this-machine>.<tailnet>.ts.net
-     proxies to localhost:8501 — the app itself stays bound to localhost,
+     proxies to localhost:8501 - the app itself stays bound to localhost,
      and Tailscale terminates HTTPS (which the PWA, mic, and camera need).
 
 On the phone: install the Tailscale app, log into the SAME account, then
@@ -28,7 +28,7 @@ if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
                 [Environment]::GetEnvironmentVariable('Path', 'User')
     if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
-        throw 'Tailscale installed but not on PATH yet — open a new terminal and re-run this script.'
+        throw 'Tailscale installed but not on PATH yet - open a new terminal and re-run this script.'
     }
 }
 
