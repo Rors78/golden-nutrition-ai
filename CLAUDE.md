@@ -14,6 +14,19 @@ CLI (`claude -p`), falling back to the Anthropic API when the CLI isn't installe
 ./scripts/install_backup_timer.sh   # nightly data snapshots -> backups/ (14 kept)
 ```
 
+Windows equivalents (PowerShell):
+
+```powershell
+venv\Scripts\python.exe run.py                     # serve (waitress when installed)
+venv\Scripts\python.exe -m pytest tests/           # test suite
+scripts\setup_remote_access.ps1                    # Tailscale phone access
+scripts\install_windows_tasks.ps1 [-StartAtLogon]  # backup/briefing/price-watch
+                                                   # scheduled tasks (+server at logon)
+```
+
+`run.py` prefers waitress (multi-threaded — long CLI-backed AI calls don't block
+other requests) and falls back to Flask's dev server if it isn't installed.
+
 The app stays bound to 127.0.0.1; remote access goes through `tailscale serve`
 (HTTPS on the private tailnet), never a wide bind. Full backup / restore lives
 in the footer (`/api/export/backup.json`, `/api/import/backup` — restore
