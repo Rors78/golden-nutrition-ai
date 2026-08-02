@@ -72,9 +72,8 @@ pip3 install -r requirements.txt
 ```
 
 ### Dependencies
-- **streamlit** - Web app framework
-- **pandas** - Data analysis
-- **plotly** - Interactive charts
+- **flask** - Web app framework
+- **waitress** - Production WSGI server (multi-threaded, Windows-friendly)
 - **anthropic** - Claude API SDK (for the AI features)
 
 ### Claude setup (for AI features)
@@ -95,10 +94,40 @@ Without either, the rest of the app works normally and the AI buttons show a set
 ## 📱 Usage
 
 ```bash
-streamlit run app.py
+python run.py        # Windows: venv\Scripts\python.exe run.py
 ```
 
-The app will open in your browser at `http://localhost:8501`
+Then open `http://localhost:8501` in your browser. With waitress installed
+(it's in requirements.txt) the app runs on a multi-threaded production server,
+so a long AI call never blocks the rest of the app.
+
+### Automation (nightly backup, morning briefing push, price-watch alerts)
+
+**Linux/macOS** — systemd user timers:
+```bash
+./scripts/install_backup_timer.sh
+./scripts/install_briefing_timer.sh
+./scripts/install_price_watch_timer.sh
+```
+
+**Windows** — one installer registers all three as Scheduled Tasks
+(backup 03:30, briefing 07:00, price watch 09:00); add `-StartAtLogon`
+to also launch the app server every time you log in:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_windows_tasks.ps1 -StartAtLogon
+```
+Remove them again with `-Uninstall`.
+
+### Phone access
+
+Put the app on your private Tailscale network with HTTPS (nothing is exposed
+to the internet) and install it as a PWA on your phone:
+```bash
+./scripts/setup_remote_access.sh     # Linux/macOS
+```
+```powershell
+scripts\setup_remote_access.ps1      # Windows
+```
 
 ## 📋 Quick Start
 
