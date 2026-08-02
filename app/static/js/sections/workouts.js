@@ -26,6 +26,25 @@ const loadLive = () => { try { return JSON.parse(localStorage.getItem(LIVE_KEY))
 const saveLive = s => localStorage.setItem(LIVE_KEY, JSON.stringify(s));
 const clearLive = () => localStorage.removeItem(LIVE_KEY);
 
+// Plate math: what to slide on each side of a 45 lb bar. Rounds to the
+// nearest 2.5-achievable load; caller compares achieved vs asked.
+const PLATE_SIZES = [45, 35, 25, 10, 5, 2.5];
+function platesPerSide(total, bar = 45) {
+  if (total < bar) return null;
+  let left = Math.round((total - bar) / 2 / 2.5) * 2.5;
+  const out = [];
+  for (const s of PLATE_SIZES) {
+    while (left >= s) { out.push(s); left = Math.round((left - s) * 100) / 100; }
+  }
+  return out;
+}
+
+// Plate math only makes sense for barbell moves — hide it for everything else.
+const NOT_BARBELL = /dumbbell|\bdb\b|cable|machine|band|lateral|fly|flye|pulldown|pushdown|face pull|raise|bodyweight|smith|leg (press|curl|extension)/i;
+const barbellish = name => !NOT_BARBELL.test(name);
+
+const e1rm = (w, r) => (w > 0 && r > 0 ? Math.round(w * (1 + r / 30)) : 0);
+
 const fmtClock = sec => sec >= 3600
   ? `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`
   : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
@@ -127,8 +146,8 @@ export function renderWorkouts(root, state) {
       const lastSet = ex.sets[ex.sets.length - 1];
       const done = ex.targetSets && ex.sets.length >= ex.targetSets;
       const chips = ex.sets.map(t =>
-        `<span style="font-family:var(--font-mono);font-size:12px;padding:2px 8px;border-radius:3px;background:var(--bg);${prevTop && t.w > prevTop ? 'color:var(--gold-bright);font-weight:700' : 'color:var(--ink-2)'}">${t.w}×${t.r}${prevTop && t.w > prevTop ? ' PR' : ''}</span>`).join('');
-      exsBox.append(el(`<div style="border-left:3px solid ${done ? 'var(--good)' : 'var(--steel)'};padding:6px 12px;display:grid;gap:6px">
+        `<span title="est 1RM ${e1rm(t.w, t.r)}" style="font-family:var(--font-mono);font-size:12px;padding:2px 8px;border-radius:3px;background:var(--bg);${prevTop && t.w > prevTop ? 'color:var(--gold-bright);font-weight:700' : 'color:var(--ink-2)'}">${t.w}×${t.r}${prevTop && t.w > prevTop ? ' PR' : ''}</span>`).join('');
+      const rowEl = el(`<div style="border-left:3px solid ${done ? 'var(--good)' : 'var(--steel)'};padding:6px 12px;display:grid;gap:6px">
         <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
           <strong style="font-size:14px">${esc(ex.name)}</strong>
           ${ex.targetSets ? `<span style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">target ${ex.targetSets}×${ex.targetReps}</span>` : ''}
@@ -141,7 +160,39 @@ export function renderWorkouts(root, state) {
           <button type="button" class="gold-btn lv-log" data-i="${i}" style="flex:0 1 auto;min-height:38px;padding:8px 16px">Log set ${ex.sets.length + 1}</button>
           ${ex.sets.length ? '' : `<button type="button" class="icon-btn danger lv-rm" data-i="${i}" title="Remove" style="flex:0">✕</button>`}
         </div>
-      </div>`));
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;font-family:var(--font-mono);font-size:11px;color:var(--muted)">
+          <span class="lv-plates"></span>
+          <a href="#" class="lv-warm" style="color:var(--steel)">warm-up ramp</a>
+          <span class="lv-warm-sets" style="color:var(--ink-2)" hidden></span>
+        </div>
+      </div>`);
+
+      const wInput = rowEl.querySelector('[data-f="w"]');
+      const platesEl = rowEl.querySelector('.lv-plates');
+      const updPlates = () => {
+        const w = Number(wInput.value) || 0;
+        if (!barbellish(ex.name) || w < 65) { platesEl.textContent = ''; return; }
+        const plates = platesPerSide(w);
+        const achieved = 45 + 2 * plates.reduce((s2, p) => s2 + p, 0);
+        platesEl.textContent = plates.length
+          ? `${achieved !== w ? `≈${achieved} ` : ''}per side: ${plates.join(' · ')}`
+          : 'empty bar';
+      };
+      wInput.addEventListener('input', updPlates);
+      updPlates();
+
+      rowEl.querySelector('.lv-warm').addEventListener('click', ev => {
+        ev.preventDefault();
+        const box = rowEl.querySelector('.lv-warm-sets');
+        if (!box.hidden) { box.hidden = true; return; }
+        const tgt = Number(wInput.value) || 0;
+        if (tgt < 95) { toast('Warm-up ramps kick in from ~95 lbs.'); return; }
+        const r5 = x => Math.max(45, Math.round(x / 5) * 5);
+        box.textContent = `bar×10 → ${r5(tgt * .4)}×8 → ${r5(tgt * .6)}×5 → ${r5(tgt * .8)}×3 → ${tgt} work`;
+        box.hidden = false;
+      });
+
+      exsBox.append(rowEl);
     });
     if (!s.exercises.length) exsBox.append(el('<div class="empty">Add your first exercise below.</div>'));
 
@@ -223,15 +274,18 @@ export function renderWorkouts(root, state) {
       .filter(([name, w]) => { const pt = prevTopOf(name); return pt && w > pt; })
       .map(([name, w]) => `${name} @ ${w} lbs`);
     const started = new Date(s.startedAt);
+    const mins = Math.max(1, Math.round((Date.now() - s.startedAt) / 60000));
+    const volume = Math.round(grouped.reduce((s2, g) => s2 + g.sets * g.reps * g.weight, 0));
     try {
       await api('POST', '/workouts', {
         date: started.toISOString().slice(0, 10),
         time: started.toTimeString().slice(0, 5),
-        name: s.name, duration: Math.max(1, Math.round((Date.now() - s.startedAt) / 60000)),
+        name: s.name, duration: mins,
         intensity: 'Hard', notes: 'Live session', exercises: grouped,
       });
       clearLive();
-      toast(prs.length ? `Session saved — NEW PR: ${prs.join(', ')}` : 'Session saved');
+      toast(`Session saved — ${volume.toLocaleString()} lbs in ${mins} min` +
+        (prs.length ? `. NEW PR: ${prs.join(', ')}` : ''));
       await refresh();
     } catch (err) { toast(err.message); }
   }
