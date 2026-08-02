@@ -279,6 +279,37 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// System pulse (footer): is the machinery guarding your data still running?
+const pulseDialog = document.getElementById('pulse-dialog');
+document.getElementById('pulse-btn')?.addEventListener('click', async () => {
+  const body = pulseDialog.querySelector('.pulse-body');
+  body.innerHTML = '<p style="margin:10px 0"><span class="spinner"></span>Checking…</p>';
+  pulseDialog.showModal();
+  try {
+    const s = await api('GET', '/system');
+    const fmtSize = b => b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+    const row = (label, val) => `<div style="display:flex;gap:14px;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line);padding:7px 0">
+      <span style="color:var(--muted);font-size:12px;white-space:nowrap">${label}</span>
+      <span style="text-align:right;font-family:var(--font-mono);font-size:12px">${val}</span></div>`;
+    const c = s.data_file.counts;
+    body.innerHTML = `
+      ${s.warnings.map(w => `<div class="callout warn" style="margin:10px 0">${esc(w)}</div>`).join('')}
+      ${row('AI backend', esc(s.ai_backend || 'none'))}
+      ${row('Server', esc(s.server))}
+      ${row('Runtime', esc(s.platform))}
+      ${row('Data file', `${fmtSize(s.data_file.bytes)} · updated ${esc((s.data_file.modified || 'never').replace('T', ' '))}`)}
+      ${row('Entries', `${c.meals} meals · ${c.workouts} workouts · ${c.weights} weigh-ins · ${c.vitals} vitals`)}
+      ${row('Backups', s.backups.count
+        ? `${s.backups.count} kept · newest ${s.backups.age_days}d ago`
+        : 'none yet')}
+      ${row("Today's briefing", s.briefing_date === new Date().toISOString().slice(0, 10)
+        ? '<span style="color:var(--good)">delivered</span>' : 'not yet')}`;
+  } catch (e) {
+    body.innerHTML = '';
+    toast(e.message);
+  }
+});
+
 // Restore from a full-backup JSON (footer). The server snapshots the current
 // file before replacing it, so a bad pick is recoverable.
 document.getElementById('restore-input')?.addEventListener('change', async ev => {
