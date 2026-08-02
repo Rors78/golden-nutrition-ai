@@ -24,6 +24,8 @@ export function renderWeight(root, state) {
   });
   root.append(form);
 
+  renderTape(root, state);
+
   if (!w.has_data) {
     root.append(el('<div class="empty" style="margin-top:14px">No weigh-ins yet. Log the first one above.</div>'));
     return;
@@ -178,4 +180,102 @@ export function renderWeight(root, state) {
     });
     tr.querySelector('.danger').addEventListener('click', () => refresh());
   }
+}
+
+const TAPE_FIELDS = [['neck_in', 'Neck'], ['chest_in', 'Chest'], ['waist_in', 'Waist'],
+  ['hips_in', 'Hips'], ['arm_in', 'Arm'], ['thigh_in', 'Thigh']];
+
+// Tape measurements + Navy body-fat estimate. Renders even before the first
+// weigh-in — the tape and the scale are independent habits.
+function renderTape(root, state) {
+  const ms = state.measurements || [];
+  const bc = state.stats.body_comp || {};
+  const last = ms[ms.length - 1], prev = ms[ms.length - 2];
+  const today = new Date().toISOString().slice(0, 10);
+
+  const card = el(`<div class="card" style="margin-top:14px">
+    <p class="chart-title">Tape measurements${bc.current != null
+      ? ` · <span style="color:var(--gold-bright)">~${bc.current}% body fat</span>${
+        bc.change != null ? ` <span style="font-size:11px;color:${bc.change <= 0 ? 'var(--good)' : 'var(--warn)'}">(${bc.change > 0 ? '+' : ''}${bc.change} since first)</span>` : ''}`
+      : ''}</p>
+    <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">Inches, same conditions every time — morning, relaxed, tape snug not tight. One row per day; re-logging a day updates it.${
+      bc.current != null ? ' Body fat is the US Navy tape estimate — track the trend, not the decimal.' : ''}</p>
+    ${bc.hint ? `<div class="callout" style="margin-bottom:10px">${esc(bc.hint)}</div>` : ''}
+    <form class="form-row" style="align-items:flex-end">
+      <label style="flex:0 1 150px">Date <input name="date" type="date" value="${today}"></label>
+      ${TAPE_FIELDS.map(([f, label]) => `<label style="flex:0 1 92px">${label}
+        <input name="${f}" type="number" step="0.1" min="0" inputmode="decimal" placeholder="${last?.[f] ?? '—'}"></label>`).join('')}
+      <button class="gold-btn" type="submit" style="flex:0 1 auto">Log tape</button>
+    </form>
+    <div class="tape-latest" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"></div>
+    <div class="tape-chart-slot"></div>
+  </div>`);
+
+  card.querySelector('form').addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      await api('POST', '/measurements', Object.fromEntries(new FormData(e.target).entries()));
+      toast('Tape logged');
+      await refresh();
+    } catch (err) { toast(err.message); }
+  });
+
+  // latest values with deltas vs the previous logging
+  const latest = card.querySelector('.tape-latest');
+  if (last) {
+    for (const [f, label] of TAPE_FIELDS) {
+      if (last[f] == null) continue;
+      const d = prev?.[f] != null ? Math.round((last[f] - prev[f]) * 10) / 10 : null;
+      latest.append(el(`<span style="display:inline-flex;flex-direction:column;gap:2px;padding:7px 12px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--bg)">
+        <span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">${label}</span>
+        <span style="font-family:var(--font-mono);font-size:14px;font-weight:700">${last[f]}″
+          ${d != null && d !== 0 ? `<small style="color:var(--muted);font-weight:400">${d > 0 ? '+' : ''}${d}</small>` : ''}</span>
+      </span>`));
+    }
+  }
+
+  // trend chart for whichever tape line has history
+  const charted = TAPE_FIELDS.filter(([f]) => ms.filter(m => m[f] != null).length >= 2);
+  if (charted.length) {
+    const slot = card.querySelector('.tape-chart-slot');
+    slot.append(el(`<div>
+      <div class="form-row" style="align-items:center;margin-top:14px">
+        <p class="chart-title" style="margin:0;flex:0 1 auto">Trend</p>
+        <label style="flex:0 1 200px"><select class="tape-sel">
+          ${charted.map(([f, label], i) => `<option value="${f}"${i === 0 ? ' selected' : ''}>${label}</option>`).join('')}
+          ${bc.series?.length >= 2 ? '<option value="bf">Body fat %</option>' : ''}
+        </select></label></div>
+      <div class="chart tape-chart" style="min-height:180px"></div>
+    </div>`));
+    const draw = f => {
+      const pts = f === 'bf'
+        ? bc.series.map(x => ({ date: x.date, v: x.bf }))
+        : ms.filter(m => m[f] != null).map(m => ({ date: m.date, v: m[f] }));
+      Plotly.newPlot(slot.querySelector('.tape-chart'),
+        [{ x: pts.map(x => x.date), y: pts.map(x => x.v), mode: 'lines+markers',
+           line: { color: CHART.gold, width: 2 }, marker: { size: 6, color: CHART.gold },
+           hovertemplate: `%{x}<br>%{y:.1f}${f === 'bf' ? '%' : '″'}<extra></extra>` }],
+        CHART.layout({ height: 180, margin: { l: 40, r: 12, t: 8, b: 28 } }),
+        CHART.config);
+    };
+    slot.querySelector('.tape-sel').addEventListener('change', ev => draw(ev.target.value));
+    draw(charted[0][0]);
+  }
+
+  // recent rows, deletable (index into the stored, date-sorted list)
+  if (ms.length) {
+    const wrap = el(`<div class="table-wrap" style="margin-top:12px"><table>
+      <thead><tr><th>Date</th>${TAPE_FIELDS.map(([, l]) => `<th class="num">${l}</th>`).join('')}<th></th></tr></thead>
+      <tbody></tbody></table></div>`);
+    const tbody = wrap.querySelector('tbody');
+    ms.map((m, idx) => ({ m, idx })).slice(-5).reverse().forEach(({ m, idx }) => {
+      const tr = el(`<tr><td>${esc(m.date)}</td>
+        ${TAPE_FIELDS.map(([f]) => `<td class="num">${m[f] ?? '—'}</td>`).join('')}</tr>`);
+      tr.append(rowActions('measurements', idx));
+      tbody.append(tr);
+    });
+    card.append(wrap);
+  }
+
+  root.append(card);
 }

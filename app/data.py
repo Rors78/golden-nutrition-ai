@@ -23,6 +23,7 @@ DEFAULT_DATA = {
     'supplement_schedule': [],
     'weights': [],
     'vitals': [],
+    'measurements': [],
     'shopping_list': [],
     'watches': [],
     'remedy_cabinet': [],
