@@ -103,6 +103,7 @@ def get_state():
             'weight': stats.weight_stats(d),
             'weight_extras': stats.weight_extras(d),
             'body_comp': stats.body_comp(d),
+            'strain': stats.training_strain(d),
             'insights': stats.insights(d),
             'progression': stats.progression(d),
             'quick_meals': stats.quick_meals(d),
@@ -518,6 +519,7 @@ def briefing():
         'body_comp': _body_comp_brief(d),
         'tape_latest': (sorted(d.get('measurements', []), key=lambda m: m['date'])[-1]
                         if d.get('measurements') else None),
+        'training_strain': stats.training_strain(d),
     })
     try:
         text = ai.daily_briefing(d['profile'], persona_prompt(coach), context)
@@ -1015,6 +1017,7 @@ def coach():
         'body_comp': _body_comp_brief(d),
         'recent_prs': stats.recent_prs(d),
         'readiness': stats.readiness(d),
+        'training_strain': stats.training_strain(d),
     }
     if not week_data['meals'] and not week_data['workouts']:
         return _err("Log some meals or workouts first — there's nothing from the last 7 days to review.")

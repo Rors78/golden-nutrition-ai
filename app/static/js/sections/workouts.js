@@ -366,6 +366,28 @@ export function renderWorkouts(root, state) {
       CHART.config);
   }
 
+  // ── strain & deload radar ──
+  const ts = state.stats.strain;
+  if (ts?.has_data) {
+    const sCard = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Strain &amp; deload radar</p>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 0">Volume-based load radar — a compass, not a verdict. Load ratio sweet spot: 0.8–1.3.</p>
+      <div class="cards metrics" style="margin-top:10px"></div>
+    </div>`);
+    sCard.querySelector('.cards').append(
+      metric('Load ratio', ts.acwr, { small: `7d vs 4-wk avg · ${ts.zone}` }),
+      metric('Monotony', ts.monotony ?? '—', { small: 'same-grind index, 7d' }),
+      metric('Climbing', ts.rising_weeks, { suffix: ' wks', small: 'volume up in a row' }),
+      metric('This week', ts.acute_7d, { suffix: ' lbs', small: `weekly norm ${ts.chronic_weekly.toLocaleString()}` }),
+    );
+    if (ts.suggestion) {
+      sCard.append(el(`<div class="callout warn" style="margin-top:10px">${esc(ts.suggestion)}</div>`));
+    } else if (ts.zone === 'sweet') {
+      sCard.append(el('<div class="callout good" style="margin-top:10px">Load is in the sweet spot — building without burying yourself.</div>'));
+    }
+    root.append(sCard);
+  }
+
   // ── log form ──
   const now = new Date();
   const form = el(`<form class="panel" style="margin-top:14px">
