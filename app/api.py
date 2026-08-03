@@ -105,6 +105,7 @@ def get_state():
             'body_comp': stats.body_comp(d),
             'strain': stats.training_strain(d),
             'energy': stats.energy_balance(d),
+            'next_targets': stats.next_targets(d),
             'insights': stats.insights(d),
             'progression': stats.progression(d),
             'quick_meals': stats.quick_meals(d),
@@ -534,6 +535,7 @@ def briefing():
                         if d.get('measurements') else None),
         'training_strain': stats.training_strain(d),
         'energy_balance': stats.energy_balance(d),
+        'lift_targets': stats.next_targets(d)[:5],
     })
     try:
         text = ai.daily_briefing(d['profile'], persona_prompt(coach), context)

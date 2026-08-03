@@ -121,6 +121,36 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_next_targets_double_progression(client):
+    data = week_of_data()
+    data["workouts"] = []
+    today = date.today()
+
+    def log(days_ago, exercise, weight, reps):
+        data["workouts"].append({
+            "date": (today - timedelta(days=days_ago)).isoformat(),
+            "time": "07:00", "name": "Push", "duration": 60, "intensity": "Hard",
+            "exercises": [{"exercise": exercise, "sets": 4, "reps": reps,
+                           "weight": weight}]})
+
+    log(5, "Bench Press", 185, 8)      # held 8 reps at 185 twice → +5
+    log(1, "Bench Press", 185, 9)
+    log(5, "Barbell Rows", 155, 10)    # reps slipped 10 → 7 → hold
+    log(1, "Barbell Rows", 155, 7)
+    log(1, "Cable Flys", 40, 12)       # single session → build
+    log(30, "Deadlift", 315, 5)        # stale (>21d) → excluded
+    seed(data)
+
+    nt = {t["exercise"]: t for t in
+          client.get("/api/state").get_json()["stats"]["next_targets"]}
+    assert nt["Bench Press"]["action"] == "increase"
+    assert nt["Bench Press"]["next_weight"] == 190
+    assert nt["Barbell Rows"]["action"] == "hold"
+    assert nt["Barbell Rows"]["next_weight"] == 155
+    assert nt["Cable Flys"]["action"] == "build"
+    assert "Deadlift" not in nt
+
+
 def test_energy_balance_adaptive_tdee(client):
     # ~1 week of data → honest silence
     seed(week_of_data())

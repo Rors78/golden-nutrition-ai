@@ -85,6 +85,8 @@ export function renderWorkouts(root, state) {
     const s = progression[String(name || '').trim()];
     return s?.length ? Math.max(...s.map(x => x.top)) : 0;
   };
+  const targets = state.stats.next_targets || [];
+  const targetOf = name => targets.find(t => t.exercise === String(name || '').trim());
   const liveWrap = el('<div class="live-wrap"></div>');
   root.append(liveWrap);
 
@@ -143,6 +145,7 @@ export function renderWorkouts(root, state) {
     const exsBox = panel.querySelector('.lv-exs');
     s.exercises.forEach((ex, i) => {
       const prevTop = prevTopOf(ex.name);
+      const tgt = targetOf(ex.name);
       const lastSet = ex.sets[ex.sets.length - 1];
       const done = ex.targetSets && ex.sets.length >= ex.targetSets;
       const chips = ex.sets.map(t =>
@@ -152,10 +155,11 @@ export function renderWorkouts(root, state) {
           <strong style="font-size:14px">${esc(ex.name)}</strong>
           ${ex.targetSets ? `<span style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">target ${ex.targetSets}×${ex.targetReps}</span>` : ''}
           ${prevTop ? `<span style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">PR ${prevTop} lbs</span>` : ''}
+          ${tgt ? `<span title="${esc(tgt.why)}" style="font-family:var(--font-mono);font-size:11px;color:${tgt.action === 'increase' ? 'var(--gold-bright)' : 'var(--steel)'}">next ${tgt.next_weight}${tgt.action === 'increase' ? ' ▲' : ''}</span>` : ''}
           <span style="display:flex;gap:6px;flex-wrap:wrap">${chips}</span>
         </div>
         <div class="form-row" style="align-items:flex-end">
-          <label style="flex:0 1 130px">Weight <input data-f="w" type="number" min="0" step="2.5" value="${lastSet ? lastSet.w : (ex.targetWeight || prevTop || 0)}"></label>
+          <label style="flex:0 1 130px">Weight <input data-f="w" type="number" min="0" step="2.5" value="${lastSet ? lastSet.w : (tgt?.next_weight || ex.targetWeight || prevTop || 0)}"></label>
           <label style="flex:0 1 110px">Reps <input data-f="r" type="number" min="1" value="${lastSet ? lastSet.r : (ex.targetReps || 10)}"></label>
           <button type="button" class="gold-btn lv-log" data-i="${i}" style="flex:0 1 auto;min-height:38px;padding:8px 16px">Log set ${ex.sets.length + 1}</button>
           ${ex.sets.length ? '' : `<button type="button" class="icon-btn danger lv-rm" data-i="${i}" title="Remove" style="flex:0">✕</button>`}
@@ -386,6 +390,26 @@ export function renderWorkouts(root, state) {
       sCard.append(el('<div class="callout good" style="margin-top:10px">Load is in the sweet spot — building without burying yourself.</div>'));
     }
     root.append(sCard);
+  }
+
+  // ── next session targets — progressive overload autopilot ──
+  if (targets.length) {
+    const ntCard = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Next session targets</p>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 8px">Double progression: hold your reps at a weight two sessions running and the bar earns more. Live sessions prefill these automatically.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Exercise</th><th class="num">Last</th><th class="num">Next</th><th>Why</th></tr></thead>
+        <tbody></tbody></table></div></div>`);
+    const tb = ntCard.querySelector('tbody');
+    for (const t of targets.slice(0, 8)) {
+      tb.append(el(`<tr>
+        <td>${esc(t.exercise)}</td>
+        <td class="num" style="font-family:var(--font-mono)">${t.last_weight}×${t.last_reps}</td>
+        <td class="num" style="font-family:var(--font-mono);font-weight:700;color:${t.action === 'increase' ? 'var(--gold-bright)' : 'var(--ink-2)'}">${t.next_weight}${t.action === 'increase' ? ' ▲' : ''}</td>
+        <td style="max-width:360px;color:var(--muted);font-size:12px">${esc(t.why)}</td>
+      </tr>`));
+    }
+    root.append(ntCard);
   }
 
   // ── log form ──
