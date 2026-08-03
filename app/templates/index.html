@@ -55,10 +55,30 @@
     <span style="border-left:1px solid var(--line);padding-left:14px">
       <a href="/api/export/backup.json" style="color:var(--gold-bright)">Full backup</a>
       · <label style="color:var(--steel);cursor:pointer">restore<input id="restore-input" type="file" accept=".json,application/json" hidden></label>
+      · <button id="import-btn" type="button" style="background:none;border:0;padding:0;color:var(--steel);cursor:pointer;font:inherit">import CSV</button>
     </span>
     <button id="pulse-btn" type="button" style="background:none;border:0;padding:0 0 0 14px;border-left:1px solid var(--line);color:var(--steel);cursor:pointer;font:inherit">system pulse</button>
     <span style="margin-left:auto">Golden Nutrition AI — the iron doesn't lie</span>
   </footer>
+
+  <dialog id="import-dialog">
+    <h2 class="display">Import history</h2>
+    <p style="color:var(--muted);font-size:13px;max-width:420px;margin:8px 0 14px">
+      Bring meals (MyFitnessPal-style export), workouts (Strong-style, one row
+      per set), or weigh-ins (date, weight) from another app. Duplicates are
+      skipped and a snapshot of your current data is saved first.</p>
+    <label>What's in the file? <select id="import-kind">
+      <option value="meals">Meals</option>
+      <option value="workouts">Workouts</option>
+      <option value="weights">Weigh-ins</option>
+    </select></label>
+    <label style="margin-top:10px;display:block">CSV file
+      <input id="import-file" type="file" accept=".csv,text/csv"></label>
+    <div class="dialog-actions">
+      <form method="dialog"><button type="submit" class="ghost-btn">Cancel</button></form>
+      <button id="import-go" type="button" class="gold-btn">Import</button>
+    </div>
+  </dialog>
 
   <dialog id="pulse-dialog">
     <h2 class="display">System pulse</h2>

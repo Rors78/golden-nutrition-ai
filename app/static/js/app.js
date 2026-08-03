@@ -279,6 +279,30 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// Import history from another app's CSV export (footer)
+const importDialog = document.getElementById('import-dialog');
+document.getElementById('import-btn')?.addEventListener('click', () => importDialog.showModal());
+document.getElementById('import-go')?.addEventListener('click', async () => {
+  const file = document.getElementById('import-file').files[0];
+  if (!file) { toast('Pick a CSV file first.'); return; }
+  const btn = document.getElementById('import-go');
+  btn.disabled = true;
+  try {
+    const res = await api('POST', '/import/csv', {
+      kind: document.getElementById('import-kind').value,
+      csv: await file.text(),
+    });
+    importDialog.close();
+    toast(`Imported ${res.imported} · skipped ${res.skipped} (duplicates/unparsable)`);
+    await refresh();
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    btn.disabled = false;
+    document.getElementById('import-file').value = '';
+  }
+});
+
 // System pulse (footer): is the machinery guarding your data still running?
 const pulseDialog = document.getElementById('pulse-dialog');
 document.getElementById('pulse-btn')?.addEventListener('click', async () => {

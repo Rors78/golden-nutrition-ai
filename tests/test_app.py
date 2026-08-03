@@ -121,6 +121,49 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_csv_import(client):
+    meals_csv = ("Date,Meal,Calories,Protein (g),Carbohydrates (g),Fat,Fiber\n"
+                 "2026-07-01,Chicken bowl,650,45,60,20,8\n"
+                 "07/02/2026,Oats,400,15,70,6,9\n")
+    r = client.post("/api/import/csv", json={"kind": "meals", "csv": meals_csv})
+    assert r.status_code == 200
+    assert r.get_json()["imported"] == 2
+    meals = client.get("/api/state").get_json()["meals"]
+    oats = next(m for m in meals if m["name"] == "Oats")
+    assert oats["date"] == "2026-07-02" and oats["protein"] == 15
+
+    # re-importing the same file is a no-op
+    r = client.post("/api/import/csv", json={"kind": "meals", "csv": meals_csv})
+    assert r.get_json()["imported"] == 0 and r.get_json()["skipped"] == 2
+
+    weights_csv = "Date,Weight (lbs)\n2026-07-01,201.5\nnot-a-date,100\n"
+    r = client.post("/api/import/csv", json={"kind": "weights", "csv": weights_csv})
+    assert r.get_json() == {**r.get_json(), "imported": 1, "skipped": 1}
+    st = client.get("/api/state").get_json()
+    assert st["weights"][0] == {"date": "2026-07-01", "weight": 201.5}
+    assert st["profile"]["weight"] == 201.5
+
+    strong_csv = ('Date,Workout Name,Exercise Name,Set Order,Weight,Reps\n'
+                  '"2026-07-03 17:01:00",Push Day,Bench Press,1,185,8\n'
+                  '"2026-07-03 17:01:00",Push Day,Bench Press,2,185,8\n'
+                  '"2026-07-03 17:01:00",Push Day,Cable Flys,1,40,12\n')
+    r = client.post("/api/import/csv", json={"kind": "workouts", "csv": strong_csv})
+    assert r.get_json()["imported"] == 1          # one grouped session
+    st = client.get("/api/state").get_json()
+    w = st["workouts"][-1]
+    assert w["date"] == "2026-07-03" and w["name"] == "Push Day"
+    assert len(w["exercises"]) == 3               # one row per set survives
+    assert st["stats"]["progression"]["Bench Press"][0]["top"] == 185
+
+    # bad shapes
+    assert client.post("/api/import/csv",
+                       json={"kind": "nope", "csv": "Date\n2026-01-01"}).status_code == 400
+    assert client.post("/api/import/csv",
+                       json={"kind": "meals", "csv": ""}).status_code == 400
+    assert client.post("/api/import/csv",
+                       json={"kind": "meals", "csv": "Foo,Bar\n1,2\n"}).status_code == 400
+
+
 def test_dashboard_radar_and_action_know_the_new_engines(client):
     data = week_of_data()
     today = date.today()
