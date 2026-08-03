@@ -121,6 +121,49 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_dashboard_radar_and_action_know_the_new_engines(client):
+    data = week_of_data()
+    today = date.today()
+    # 5 weeks of climbing volume → deload warning; bench held reps → increase
+    data["workouts"] = []
+    for wk in range(5):
+        for d_off in (1, 3, 5):
+            day = (today - timedelta(days=7 * wk + d_off)).isoformat()
+            data["workouts"].append({
+                "date": day, "time": "07:00", "name": "Legs", "duration": 60,
+                "intensity": "Hard",
+                "exercises": [{"exercise": "Squats", "sets": 5, "reps": 10,
+                               "weight": 100 + (4 - wk) * 25}]})
+    for d_off, reps in ((5, 8), (1, 9)):
+        data["workouts"].append({
+            "date": (today - timedelta(days=d_off)).isoformat(), "time": "08:00",
+            "name": "Push", "duration": 60, "intensity": "Hard",
+            "exercises": [{"exercise": "Bench Press", "sets": 4, "reps": reps,
+                           "weight": 185}]})
+    # 21 days of intake + falling weight → TDEE delta vs the 2200 goal
+    data["meals"], data["weights"] = [], []
+    for i in range(21):
+        day = (today - timedelta(days=i)).isoformat()
+        data["meals"].append({"date": day, "time": "12:00", "name": "Day food",
+                              "protein": 150, "calories": 2000, "carbs": 150,
+                              "fat": 60, "fiber": 20, "notes": ""})
+        data["weights"].append({"date": day, "weight": 197 + 3 * i / 20})
+    # today's plan includes bench → the train action should call the number
+    day_name = today.strftime("%A")
+    data["plan"] = {"coach": "cutler", "plan": {"week": [
+        {"day": day_name, "title": "Push Day", "focus": "Chest",
+         "details": ["Bench Press: 4×8 @ 185 lbs"]}]}}
+    seed(data)
+
+    dash = client.get("/api/state").get_json()["stats"]["dashboard"]
+    radar_text = " ".join(r["text"] for r in dash["radar"]).lower()
+    # the strain radar fires (spike outranks deload when both apply)
+    assert "acute load" in radar_text or "deload" in radar_text
+    assert "tdee" in radar_text
+    train = next(a for a in dash["actions"] if a["id"] == "train")
+    assert "Bench Press earns 190" in train["text"]
+
+
 def test_sentinel_alerts():
     from app.stats import sentinel_alerts
 
