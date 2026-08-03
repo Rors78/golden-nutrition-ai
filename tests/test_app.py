@@ -121,6 +121,33 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_recipe_box(client):
+    items = [{"name": "Chicken", "protein": 60, "calories": 330, "carbs": 0,
+              "fat": 8, "fiber": 0},
+             {"name": "Rice", "protein": 8, "calories": 400, "carbs": 88,
+              "fat": 2, "fiber": 2}]
+    r = client.post("/api/recipes", json={"name": "Chicken & rice",
+                                          "servings": 2, "items": items})
+    assert r.status_code == 200
+    st = client.get("/api/state").get_json()
+    assert len(st["recipes"]) == 1 and st["recipes"][0]["servings"] == 2
+
+    # 1.5 servings: per serving 34g P / 365 cal → 51g / 547.5
+    client.post("/api/recipes/0/log", json={"servings": 1.5})
+    meal = client.get("/api/state").get_json()["meals"][-1]
+    assert meal["name"] == "Chicken & rice ×1.5"
+    assert meal["protein"] == 51
+    assert meal["calories"] == 547.5
+
+    # validations
+    assert client.post("/api/recipes", json={"servings": 2, "items": items}).status_code == 400
+    assert client.post("/api/recipes", json={"name": "Empty", "items": []}).status_code == 400
+    assert client.post("/api/recipes/9/log", json={}).status_code == 404
+    assert client.delete("/api/recipes/9").status_code == 404
+    assert client.delete("/api/recipes/0").status_code == 200
+    assert client.get("/api/state").get_json()["recipes"] == []
+
+
 def test_next_targets_double_progression(client):
     data = week_of_data()
     data["workouts"] = []

@@ -285,7 +285,22 @@ export function renderMeals(root, state) {
       <div class="form-row">
         <button class="gold-btn add-all" type="button">Add all to log</button>
         <button class="ghost-btn discard" type="button">Discard estimate</button>
+      </div>
+      <div class="form-row" style="margin-top:8px;align-items:flex-end">
+        <label style="flex:2 1 200px">Save as recipe <input type="text" class="rcp-name" placeholder="Chicken burrito bowl"></label>
+        <label style="flex:0 1 110px">Servings <input type="number" class="rcp-serv" step="0.5" min="0.5" value="1"></label>
+        <button class="ghost-btn rcp-save" type="button" style="flex:0 1 auto">Save recipe</button>
       </div></div>`);
+    wrap.querySelector('.rcp-save').addEventListener('click', async () => {
+      const name = wrap.querySelector('.rcp-name').value.trim();
+      if (!name) { toast('Name the recipe first.'); return; }
+      try {
+        await api('POST', '/recipes', {
+          name, servings: Number(wrap.querySelector('.rcp-serv').value) || 1, items: meals });
+        toast(`Recipe saved: ${name}`);
+        await refresh();
+      } catch (e) { toast(e.message); }
+    });
     wrap.querySelector('.add-all').addEventListener('click', async () => {
       try {
         await api('POST', '/meals/ai/add', { meals });
@@ -392,6 +407,52 @@ export function renderMeals(root, state) {
       } catch (err) { toast(err.message); }
     });
     root.append(qCard);
+  }
+
+  // ── recipe box — whole dishes, scaled by servings ──
+  const recipes = state.recipes || [];
+  if (recipes.length) {
+    const rCard = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Recipe box</p>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 0">Cook once, log forever. Save a dish from any AI estimate; log servings of it here.</p>
+      <div class="rc-list" style="display:grid;gap:8px;margin-top:10px"></div></div>`);
+    const list = rCard.querySelector('.rc-list');
+    recipes.forEach((r, i) => {
+      const per = f => Math.round(r.items.reduce((s, x) => s + (x[f] || 0), 0) / (r.servings || 1) * 10) / 10;
+      const row = el(`<div class="deal">
+        <div class="deal-top"><span class="deal-item">${esc(r.name)}</span>
+          <span style="font-family:var(--font-mono);font-size:12px;color:var(--gold-bright);white-space:nowrap">${per('protein')}g P · ${per('calories')} cal / serving</span></div>
+        <div class="deal-meta">${esc(r.items.map(x => x.name).join(', '))} · makes ${r.servings}</div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <label style="flex:0 1 110px;font-size:12px">Servings <input type="number" step="0.5" min="0.5" value="1"></label>
+          <button class="ghost-btn rc-log" type="button" style="min-height:34px;padding:6px 14px;font-size:12px">Log it</button>
+          <button class="icon-btn danger rc-del" type="button" title="Delete recipe" style="margin-left:auto">✕</button>
+        </div></div>`);
+      row.querySelector('.rc-log').addEventListener('click', async () => {
+        try {
+          await api('POST', `/recipes/${i}/log`,
+            { servings: Number(row.querySelector('input').value) || 1 });
+          toast(`Logged: ${r.name}`);
+          await refresh();
+        } catch (e) { toast(e.message); }
+      });
+      row.querySelector('.rc-del').addEventListener('click', async ev => {
+        const b = ev.target;
+        if (b.dataset.armed) {
+          try {
+            await api('DELETE', `/recipes/${i}`);
+            toast('Recipe deleted');
+            await refresh();
+          } catch (e) { toast(e.message); }
+          return;
+        }
+        b.dataset.armed = '1';
+        toast('Tap ✕ again to delete');
+        setTimeout(() => delete b.dataset.armed, 3000);
+      });
+      list.append(row);
+    });
+    root.append(rCard);
   }
 
   // ── manual entry ──
