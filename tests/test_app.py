@@ -121,6 +121,39 @@ def _log_workout(client, day, exercises):
                                        "intensity": "Hard", "exercises": exercises})
 
 
+def test_sentinel_alerts():
+    from app.stats import sentinel_alerts
+
+    # trouble on every front
+    data = week_of_data()
+    data["workouts"] = []
+    for wk in range(5):
+        for d_off in (1, 3, 5):
+            day = (date.today() - timedelta(days=7 * wk + d_off)).isoformat()
+            data["workouts"].append({
+                "date": day, "time": "07:00", "name": "Legs", "duration": 60,
+                "intensity": "Hard",
+                "exercises": [{"exercise": "Squats", "sets": 5, "reps": 10,
+                               "weight": 100 + (4 - wk) * 25}]})
+    data["vitals"] = [{"date": date.today().isoformat(), "sleep_h": 2.0}]
+    alerts = sentinel_alerts(data, backup_age_days=5, last_log_age_days=4)
+    joined = " ".join(alerts).lower()
+    assert "backup" in joined            # stale backup
+    assert "nothing logged" in joined    # logging went quiet
+    assert "deload" in joined            # strain warning
+    assert "readiness" in joined         # cratered recovery
+
+    # a healthy day is silent
+    quiet = sentinel_alerts(week_of_data(), backup_age_days=0.3,
+                            last_log_age_days=0.1)
+    assert quiet == []
+
+    # no backups at all is itself an alert
+    assert any("backup" in a.lower()
+               for a in sentinel_alerts(week_of_data(), backup_age_days=None,
+                                        last_log_age_days=0.1))
+
+
 def test_recipe_box(client):
     items = [{"name": "Chicken", "protein": 60, "calories": 330, "carbs": 0,
               "fat": 8, "fiber": 0},
