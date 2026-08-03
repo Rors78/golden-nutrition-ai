@@ -393,6 +393,33 @@ def weekly_volume(data, weeks=8):
     return out
 
 
+def sentinel_alerts(data, backup_age_days=None, last_log_age_days=None):
+    """Conditions worth a phone tap — returns [] when everything is fine.
+
+    Pure function: filesystem facts (backup age, days since the data file
+    changed) are computed by the caller (scripts/sentinel.py) and passed in.
+    """
+    alerts = []
+    if backup_age_days is None:
+        alerts.append('No backups found — install the nightly backup job.')
+    elif backup_age_days > 2:
+        alerts.append(f'Newest backup is {backup_age_days:.0f} days old — '
+                      'the backup job may have stopped.')
+    if last_log_age_days is not None and last_log_age_days >= 3:
+        alerts.append(f'Nothing logged in {last_log_age_days:.0f} days — '
+                      'the streak misses you.')
+    ts = training_strain(data)
+    if ts.get('suggestion'):
+        alerts.append(ts['suggestion'])
+    rd = readiness(data)
+    if rd.get('has_data') and rd.get('level') == 'recover':
+        alerts.append(f"Readiness {rd['score']} — {rd['guidance']}")
+    wx = weight_extras(data)
+    if wx.get('plateau'):
+        alerts.append(wx['plateau'])
+    return alerts
+
+
 def next_targets(data):
     """Next-session load suggestions via simplified double progression.
 

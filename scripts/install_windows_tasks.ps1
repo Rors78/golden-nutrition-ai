@@ -5,6 +5,7 @@ systemd user timers used on Linux:
     Backup       03:30 daily       scripts/backup_data.py     (14 snapshots kept)
     Briefing     07:00 daily       scripts/daily_briefing.py  (morning coach push)
     PriceWatch   09:00 daily       scripts/price_watch.py     (deal drop alerts)
+    Sentinel     12:00 daily       scripts/sentinel.py        (alerts only on trouble)
     WeeklyReview 18:00 Sundays     scripts/weekly_review.py   (coaching review push)
 
 Usage (from anywhere):
@@ -27,11 +28,12 @@ $TaskPath = '\GoldenNutritionAI\'
 $jobs = @(
     @{ Name = 'Backup';     Script = 'scripts\backup_data.py';    At = '03:30' },
     @{ Name = 'Briefing';   Script = 'scripts\daily_briefing.py'; At = '07:00' },
-    @{ Name = 'PriceWatch'; Script = 'scripts\price_watch.py';    At = '09:00' }
+    @{ Name = 'PriceWatch'; Script = 'scripts\price_watch.py';    At = '09:00' },
+    @{ Name = 'Sentinel';   Script = 'scripts\sentinel.py';       At = '12:00' }
 )
 
 if ($Uninstall) {
-    foreach ($name in @('Backup', 'Briefing', 'PriceWatch', 'WeeklyReview', 'Server')) {
+    foreach ($name in @('Backup', 'Briefing', 'PriceWatch', 'Sentinel', 'WeeklyReview', 'Server')) {
         try {
             Unregister-ScheduledTask -TaskName $name -TaskPath $TaskPath -Confirm:$false -ErrorAction Stop
             Write-Host "Removed $TaskPath$name"
