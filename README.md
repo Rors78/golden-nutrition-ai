@@ -1,8 +1,56 @@
 # 🏋️ Golden Nutrition AI
 
-Smart fitness and nutrition tracking app with AI-powered insights. Built with Streamlit for an intuitive, data-driven approach to reaching your fitness goals.
+A self-hosted training and nutrition platform with a real AI coach. Flask JSON API +
+dependency-free vanilla-JS PWA that runs on your own machine, tracks everything —
+meals, lifts, body, recovery — and **adapts**: calorie targets from your measured
+metabolism, lifting loads that progress themselves, deload warnings before you dig a
+hole, and daily briefings from a 20-coach roster powered by Claude on your own
+subscription. Your data lives in one local JSON file you own, backed up nightly,
+reachable from your phone over your private Tailscale network.
+
+MIT-licensed. No accounts, no cloud, no subscription fees.
 
 ## ✨ Features
+
+### 🏋️ Live Workout Mode
+- Train with the clock running: log each set as you rack it, auto-starting rest timer (beep + vibrate)
+- One-tap start from your coach's plan or Cutler Mode templates
+- Plate math per barbell exercise ("per side: 45 · 25 · 5"), warm-up ramp calculator, live PR flags, Epley e1RM per set
+- Crash-safe: a session in progress survives refreshes and phone sleep
+
+### 🎯 Progressive Overload Autopilot
+- Next-session load targets per exercise via double progression — hold your reps two sessions running and the bar earns +5 lbs
+- Live sessions prefill the suggested weight; the coach calls your numbers in the morning briefing
+
+### 🔥 Adaptive TDEE
+- Your *measured* maintenance calories from 21 days of weigh-ins + food logs — not a formula guess
+- Recommends the calorie target that hits your goal pace, with one-tap adoption and honest confidence grading
+
+### 📡 Strain & Deload Radar
+- Acute:chronic load ratio, training monotony, and consecutive climbing weeks from your own volume history
+- One suggestion when warranted: pull back, bank a deload, or vary the grind
+
+### 🍽️ Meal Logging, Four Ways
+- **AI Quick Log** — describe what you ate in plain language; Claude estimates the macros
+- **Barcode scan** — phone camera (or typed digits) → Open Food Facts → real label macros
+- **Snap the plate** — Claude vision estimates from a photo
+- **Recipe box** — save any dish once, log scaled servings forever; plus quick-add regulars and full manual entry
+
+### 📏 Body Suite — Scale, Tape, Mirror
+- Daily weigh-ins with trend, goal projection, milestone plates, and weekly check-ins
+- Tape measurements with per-line trend charts and a US Navy body-fat estimate
+- Progress photos: local-only dated timeline, tap two to compare side by side
+
+### 🤖 A Coach Who Sees Everything
+- 20 research-backed coach personas; daily briefing, live chat, weekly review, and training-week builder
+- Every AI touchpoint sees your macros, lifts, PRs, tape, body fat, readiness, strain, and metabolism
+- Supplement advice graded against an evidence knowledge base (proven → garbage)
+
+### 🛰️ It Runs Itself
+- Nightly backups, 7:00 briefing push, Sunday coaching review, daily deal price-watch — as systemd timers or Windows Scheduled Tasks
+- A noon **sentinel** that pushes to your phone *only when something is wrong* (stale backup, strain spike, cratered readiness, logging gone quiet)
+- **System pulse** panel: backup freshness, AI backend, server, and data health at a glance
+- Production WSGI server (waitress), atomic writes, corruption recovery, full export/restore
 
 ### 📊 Dashboard
 - Real-time daily summary of protein, calories, meals, and workouts
