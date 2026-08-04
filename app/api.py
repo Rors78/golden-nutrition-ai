@@ -10,7 +10,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request, Response, send_from_directory
 
-from . import ai, data as store, food_db, notify, stats
+from . import ai, data as store, food_db, importer, notify, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
 from .data import MACRO_FIELDS, clean_num
 from .remedies_kb import kb_stats, load_kb, remedy_of_day, search_kb
@@ -1231,6 +1231,26 @@ def export_backup():
     return Response(json.dumps(d, indent=2), mimetype='application/json',
                     headers={'Content-Disposition':
                              f'attachment; filename=golden-nutrition-{date.today().isoformat()}.json'})
+
+
+@bp.post('/import/csv')
+def import_csv():
+    """Bring history from another app. Snapshots first; duplicates skipped."""
+    body = request.get_json(force=True)
+    kind = str(body.get('kind', ''))
+    text = str(body.get('csv', ''))
+    if not text.strip():
+        return _err('Empty CSV.')
+    d = store.load()
+    snap = Path('nutrition_data.pre-import.json')
+    snap.write_text(json.dumps(d, indent=2))
+    try:
+        imported, skipped = importer.import_kind(kind, text, d)
+    except ValueError as e:
+        return _err(e)
+    store.save(d)
+    return jsonify({'ok': True, 'imported': imported, 'skipped': skipped,
+                    'snapshot': str(snap)})
 
 
 @bp.post('/import/backup')

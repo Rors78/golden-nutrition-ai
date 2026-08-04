@@ -3,6 +3,7 @@ venv/
 .streamlit/
 nutrition_data.json
 nutrition_data.pre-restore.json
+nutrition_data.pre-import.json
 backups/
 photos/
 .claude/worktrees/
