@@ -74,6 +74,11 @@ must keep loading (defaults fill in — `test_legacy_v1_data_still_loads` guards
 - Charts: single axis, gold `#d9a441` primary / steel `#7da7c4` secondary,
   recessive grid, `CHART.config` (no modebar), hover templates on every trace.
 - After any behavior change: add/adjust a test in `tests/test_app.py` and run pytest.
+- Then verify in a browser — pytest cannot catch a silent partial render.
+  Serve the worktree on a spare port (`python run.py 8502`) and click the feature.
+- **Read [SCARS.md](SCARS.md) before touching `app/ai.py` subprocess calls, any
+  `.ps1` script, or `el()` markup with multiple roots** — those three have each
+  cost a debugging session already.
 
 ## Specialist agents
 
