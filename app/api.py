@@ -252,10 +252,19 @@ def system_pulse():
                         'scripts\\install_windows_tasks.ps1).')
     if not ai.backend_name():
         warnings.append('No AI backend — install Claude Code or set ANTHROPIC_API_KEY.')
+    if not (d['settings'].get('ntfy_topic') or '').strip():
+        warnings.append('No notification topic — the sentinel, briefing, and '
+                        'price-watch jobs have nowhere to push. Set one in Vitals.')
+    quiet = stats.days_since_user_entry(d)
+    if quiet is not None and quiet >= 3:
+        warnings.append(f'Nothing logged in {quiet} days — the adaptive engines '
+                        'run on recent history.')
     return jsonify({
         'data_file': {**file_info, 'counts': counts, 'path': str(df.resolve())},
         'backups': backups,
         'briefing_date': (d.get('briefing') or {}).get('date'),
+        'push_channel': bool((d['settings'].get('ntfy_topic') or '').strip()),
+        'days_since_entry': stats.days_since_user_entry(d),
         'ai_backend': ai.backend_name(),
         'server': request.environ.get('SERVER_SOFTWARE') or 'Flask dev server',
         'platform': f'Python {platform.python_version()} on {sys.platform}',

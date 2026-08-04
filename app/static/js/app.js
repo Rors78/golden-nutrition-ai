@@ -327,7 +327,13 @@ document.getElementById('pulse-btn')?.addEventListener('click', async () => {
         ? `${s.backups.count} kept · newest ${s.backups.age_days}d ago`
         : 'none yet')}
       ${row("Today's briefing", s.briefing_date === new Date().toISOString().slice(0, 10)
-        ? '<span style="color:var(--good)">delivered</span>' : 'not yet')}`;
+        ? '<span style="color:var(--good)">delivered</span>' : 'not yet')}
+      ${row('Push channel', s.push_channel
+        ? '<span style="color:var(--good)">configured</span>'
+        : '<span style="color:var(--warn)">none — jobs cannot reach you</span>')}
+      ${row('Last logged', s.days_since_entry == null ? 'never'
+        : s.days_since_entry === 0 ? '<span style="color:var(--good)">today</span>'
+        : `${s.days_since_entry}d ago`)}`;
   } catch (e) {
     body.innerHTML = '';
     toast(e.message);

@@ -104,7 +104,48 @@ back a maintenance figure that is too low.
 
 ---
 
-## 7. Server lifetime: use the scheduled task, not a session shell
+## 7. False green: "nothing logged" measured the app, not the user
+
+**Incident.** A false-green audit fed the sentinel a data file whose newest user
+entry was 8 days old — and it reported all clear.
+
+**Cause.** The quiet-logging alert read the data file's **mtime**. The app
+rewrites that file during ordinary activity (minting an ingest token on
+`/api/state`, saving settings), so mtime measured *the app being alive*, not
+*the user showing up*. The check could never fire while the server ran — which
+is precisely when you would want it to.
+
+**Fix.** `stats.days_since_user_entry()` derives the answer from actual entry
+dates across meals/workouts/weights/vitals/supplements/measurements. Never
+logged is its own distinct alert, not silence.
+
+**The general rule:** healthy-by-absence is the most common false green there
+is. When a check reports "fine", confirm it *measured something and found
+nothing* rather than *measured nothing*.
+
+---
+
+## 8. False green: a scheduled job that exits 0 while telling nobody
+
+**Incident.** The `\GoldenNutritionAI\Sentinel` task showed `LastTaskResult: 0`
+— success — after its 12:00 run. It had, in fact, notified no one: no ntfy topic
+was configured, so the alerts went to a `print()` no human reads.
+
+**Cause.** `sentinel.py` returned 0 unconditionally. An undeliverable alert and a
+clean bill of health were the same exit code.
+
+**Fix.** The sentinel now exits **3** when it has alerts but no push channel and
+**2** when the push raises, so Task Scheduler's LastTaskResult stops lying.
+System Pulse also warns when no notification topic is set, since that panel is
+where a human actually looks.
+
+**If you undo it:** the entire alerting layer reverts to decorative — every job
+green, nobody told. Verified red-capable: with alerts and no topic the script
+exits 3; healthy with a topic it exits 0 and stays silent.
+
+---
+
+## 9. Server lifetime: use the scheduled task, not a session shell
 
 **Incident.** The app died when a Claude Code session ended, because it had been
 started as a background shell owned by that session.

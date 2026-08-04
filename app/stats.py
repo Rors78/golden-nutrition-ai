@@ -393,11 +393,32 @@ def weekly_volume(data, weeks=8):
     return out
 
 
+def days_since_user_entry(data):
+    """Days since the user last logged anything real, or None if never.
+
+    Derived from entry dates, NOT the data file's mtime: the app rewrites
+    that file on ordinary activity (minting an ingest token, saving
+    settings), so mtime measures the app being alive, not the user showing
+    up. A false-green audit caught the quiet version of this.
+    """
+    days = [e['date'] for key in ('meals', 'workouts', 'weights', 'vitals',
+                                  'supplements', 'measurements')
+            for e in (data.get(key) or []) if e.get('date')]
+    if not days:
+        return None
+    try:
+        return (date.today() - date.fromisoformat(max(days))).days
+    except ValueError:
+        return None
+
+
 def sentinel_alerts(data, backup_age_days=None, last_log_age_days=None):
     """Conditions worth a phone tap — returns [] when everything is fine.
 
-    Pure function: filesystem facts (backup age, days since the data file
-    changed) are computed by the caller (scripts/sentinel.py) and passed in.
+    Pure function: filesystem facts (backup age) are computed by the caller
+    (scripts/sentinel.py) and passed in. `last_log_age_days` is accepted for
+    compatibility but the quiet-logging check derives its own answer from
+    entry dates — see days_since_user_entry.
     """
     alerts = []
     if backup_age_days is None:
@@ -405,9 +426,12 @@ def sentinel_alerts(data, backup_age_days=None, last_log_age_days=None):
     elif backup_age_days > 2:
         alerts.append(f'Newest backup is {backup_age_days:.0f} days old — '
                       'the backup job may have stopped.')
-    if last_log_age_days is not None and last_log_age_days >= 3:
-        alerts.append(f'Nothing logged in {last_log_age_days:.0f} days — '
-                      'the streak misses you.')
+    quiet = days_since_user_entry(data)
+    if quiet is None:
+        alerts.append('Nothing logged yet — log a meal, a lift, or a weigh-in '
+                      'to start the history the coaching runs on.')
+    elif quiet >= 3:
+        alerts.append(f'Nothing logged in {quiet} days — the streak misses you.')
     ts = training_strain(data)
     if ts.get('suggestion'):
         alerts.append(ts['suggestion'])

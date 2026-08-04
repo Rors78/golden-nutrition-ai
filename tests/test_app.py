@@ -207,6 +207,49 @@ def test_dashboard_radar_and_action_know_the_new_engines(client):
     assert "Bench Press earns 190" in train["text"]
 
 
+def test_quiet_logging_measures_entries_not_file_mtime(client):
+    """False-green regression: the quiet-logging alert once read the data
+    file's mtime, which the app itself rewrites — so an abandoned log stayed
+    silent as long as the app was running."""
+    from app.stats import days_since_user_entry, sentinel_alerts
+
+    # data with entries only from 10 days ago
+    old = (date.today() - timedelta(days=10)).isoformat()
+    data = {"profile": {}, "meals": [{"date": old, "name": "x", "calories": 500}],
+            "workouts": [], "weights": [], "vitals": [], "supplements": [],
+            "measurements": []}
+    assert days_since_user_entry(data) == 10
+    # the mtime-derived argument claims activity today; the alert must ignore it
+    alerts = sentinel_alerts(data, backup_age_days=0.1, last_log_age_days=0.0)
+    assert any("10 days" in a for a in alerts)
+
+    # never logged at all is its own distinct alert, not silence
+    empty = {**data, "meals": []}
+    assert days_since_user_entry(empty) is None
+    assert any("Nothing logged yet" in a
+               for a in sentinel_alerts(empty, backup_age_days=0.1))
+
+    # logged today → quiet-logging alert absent
+    fresh = {**data, "meals": [{"date": date.today().isoformat(), "name": "x"}]}
+    assert not any("misses you" in a
+                   for a in sentinel_alerts(fresh, backup_age_days=0.1))
+
+
+def test_system_pulse_flags_missing_push_channel(client):
+    """A sentinel with nowhere to push is a job that reports success while
+    telling nobody — surface it where the user actually looks."""
+    seed(week_of_data())
+    s = client.get("/api/system").get_json()
+    assert s["push_channel"] is False
+    assert any("notification topic" in w.lower() for w in s["warnings"])
+    assert s["days_since_entry"] == 0        # week_of_data logs through today
+
+    client.post("/api/settings", json={"ntfy_topic": "gna-test-topic"})
+    s = client.get("/api/system").get_json()
+    assert s["push_channel"] is True
+    assert not any("notification topic" in w.lower() for w in s["warnings"])
+
+
 def test_sentinel_alerts():
     from app.stats import sentinel_alerts
 
@@ -214,30 +257,33 @@ def test_sentinel_alerts():
     data = week_of_data()
     data["workouts"] = []
     for wk in range(5):
-        for d_off in (1, 3, 5):
+        for d_off in (4, 5, 6):          # nothing newer than 4 days ago
             day = (date.today() - timedelta(days=7 * wk + d_off)).isoformat()
             data["workouts"].append({
                 "date": day, "time": "07:00", "name": "Legs", "duration": 60,
                 "intensity": "Hard",
                 "exercises": [{"exercise": "Squats", "sets": 5, "reps": 10,
                                "weight": 100 + (4 - wk) * 25}]})
-    data["vitals"] = [{"date": date.today().isoformat(), "sleep_h": 2.0}]
-    alerts = sentinel_alerts(data, backup_age_days=5, last_log_age_days=4)
+    # cratered recovery, logged 4 days ago — so the log has also gone quiet
+    data["vitals"] = [{"date": (date.today() - timedelta(days=4)).isoformat(),
+                       "sleep_h": 2.0}]
+    data["meals"] = [m for m in data["meals"]
+                     if m["date"] <= (date.today() - timedelta(days=4)).isoformat()]
+    data["weights"] = [w for w in data["weights"]
+                       if w["date"] <= (date.today() - timedelta(days=4)).isoformat()]
+    alerts = sentinel_alerts(data, backup_age_days=5)
     joined = " ".join(alerts).lower()
     assert "backup" in joined            # stale backup
-    assert "nothing logged" in joined    # logging went quiet
-    assert "deload" in joined            # strain warning
+    assert "nothing logged in 4 days" in joined   # from entry dates, not mtime
+    assert "deload" in joined or "acute load" in joined   # strain warning
     assert "readiness" in joined         # cratered recovery
 
     # a healthy day is silent
-    quiet = sentinel_alerts(week_of_data(), backup_age_days=0.3,
-                            last_log_age_days=0.1)
-    assert quiet == []
+    assert sentinel_alerts(week_of_data(), backup_age_days=0.3) == []
 
     # no backups at all is itself an alert
     assert any("backup" in a.lower()
-               for a in sentinel_alerts(week_of_data(), backup_age_days=None,
-                                        last_log_age_days=0.1))
+               for a in sentinel_alerts(week_of_data(), backup_age_days=None))
 
 
 def test_recipe_box(client):
