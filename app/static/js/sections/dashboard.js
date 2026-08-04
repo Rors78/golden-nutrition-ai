@@ -203,7 +203,14 @@ export function renderDashboard(root, state) {
         <button class="ghost-btn" type="button" style="flex:0 1 auto">Full week</button>
       </div>
       <ul style="margin:10px 0 0;padding-left:20px;color:var(--ink-2);font-size:13px">
-        ${planDay.details.map(x => `<li style="margin:3px 0">${esc(x)}</li>`).join('')}
+        ${planDay.details.map(x => {
+          const hit = (state.stats.next_targets || []).find(t =>
+            String(x).toLowerCase().includes(t.exercise.toLowerCase()));
+          const tag = hit ? ` <span title="${esc(hit.why)}" style="font-family:var(--font-mono);font-size:11px;color:${
+            hit.action === 'increase' ? 'var(--gold-bright)' : 'var(--steel)'}">→ next ${hit.next_weight}${
+            hit.action === 'increase' ? ' ▲' : ''}</span>` : '';
+          return `<li style="margin:3px 0">${esc(x)}${tag}</li>`;
+        }).join('')}
       </ul>
     </div>`);
     card.querySelector('button').addEventListener('click', () => { location.hash = 'coach'; });

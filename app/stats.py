@@ -1123,8 +1123,17 @@ def dashboard_extras(data):
         plan_day = next((x for x in (data.get('plan') or {}).get('plan', {}).get('week', [])
                          if today.strftime('%A').lower() in str(x.get('day', '')).lower()), None)
         title = (plan_day or {}).get('title', 'your session')
-        actions.append({'id': 'train', 'tab': 'workouts',
-                        'text': f"Today is {title} — load it in Workouts."})
+        text = f"Today is {title} — load it in Workouts."
+        # If the overload autopilot has earned an increase on one of today's
+        # planned lifts, put the number in the call to action.
+        for t in next_targets(data):
+            if t['action'] == 'increase' and plan_day and any(
+                    t['exercise'].lower() in str(line).lower()
+                    for line in plan_day.get('details', [])):
+                text = (f"Today is {title} — {t['exercise']} earns "
+                        f"{t['next_weight']:g} lbs. Load it in Workouts.")
+                break
+        actions.append({'id': 'train', 'tab': 'workouts', 'text': text})
     protein_today = sum(m.get('protein', 0) for m in data['meals']
                         if m['date'] == today.isoformat())
     if now.hour >= 15 and protein_today < protein_goal * 0.5:
@@ -1144,7 +1153,19 @@ def dashboard_extras(data):
                             'text': f"{left} supplement{'s' if left > 1 else ''} still unticked today."})
 
     # ── radar: cross-tab signals worth a glance (not actions, awareness) ──
+    # Priority order: training load and metabolism first — they change what
+    # today should look like; shopping intel last.
     radar = []
+    ts = training_strain(data)
+    if ts.get('suggestion'):
+        radar.append({'tab': 'workouts', 'level': 'warn', 'text': ts['suggestion']})
+    en = energy_balance(data)
+    if en.get('has_data') and abs(en['delta']) >= 100:
+        radar.append({'tab': 'meals',
+                      'level': 'good' if en['delta'] > 0 else 'warn',
+                      'text': (f"Measured TDEE ~{en['tdee']} — the math says "
+                               f"{en['recommended_calories']} calories; your goal is "
+                               f"{en['current_goal']}. One tap to adopt in Meals.")})
     low = [item['name'] for item in schedule
            if item.get('servings_left') is not None and item['servings_left'] <= 7]
     if low:
