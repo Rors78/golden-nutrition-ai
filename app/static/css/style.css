@@ -479,6 +479,66 @@ dialog form { display: grid; gap: 12px; }
   .onboarding .ob-step { grid-template-columns: 20px 1fr; }
 }
 
+/* ── demo mode ──────────────────────────────────────────────────────── */
+/* A screen nobody is standing at has to explain itself, so each stop is
+   captioned and the progress bar shows the loop is alive. */
+body.demo-on .quick-bar, body.demo-on #profile-btn { opacity: .25; pointer-events: none; }
+.demo-chrome { position: fixed; inset: 0; z-index: 70; pointer-events: none; }
+.demo-tag {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 40px;
+  display: flex; align-items: baseline; gap: 12px; max-width: 92vw;
+  padding: 14px 24px; border-radius: 12px;
+  background: rgba(8, 10, 14, .88); border: 1px solid var(--gold-dim);
+  backdrop-filter: blur(6px);
+}
+.demo-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--hot, #ef6a5f);
+  animation: demo-pulse 1.6s ease-in-out infinite; flex: none;
+  align-self: center;
+}
+@keyframes demo-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.demo-tag b {
+  font-family: var(--font-mono); font-size: 13px; letter-spacing: .26em;
+  color: var(--gold-bright); text-transform: uppercase; white-space: nowrap;
+}
+.demo-tag .demo-sub { font-size: 13px; color: var(--ink-2); line-height: 1.4; }
+.demo-exit {
+  position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .24em;
+  text-transform: uppercase; color: var(--muted); opacity: .7;
+}
+.demo-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--line); }
+.demo-bar i { display: block; height: 100%; width: 0; background: var(--gold); }
+@media (max-width: 720px) {
+  .demo-tag { flex-direction: column; gap: 5px; bottom: 26px; padding: 12px 18px; }
+  .demo-tag .demo-sub { font-size: 12px; }
+}
+
+/* ── quick log bar ──────────────────────────────────────────────────── */
+.quick-bar { display: flex; align-items: stretch; gap: 0; flex: 1 1 300px; max-width: 420px; }
+.quick-bar input {
+  flex: 1; min-width: 0; height: 38px; padding: 0 12px;
+  font-family: var(--font-mono); font-size: 12.5px;
+  background: var(--card-2); color: var(--ink);
+  border: 1px solid var(--line); border-right: none;
+  border-radius: 8px 0 0 8px;
+}
+.quick-bar input::placeholder { color: var(--muted); }
+.quick-bar input:focus {
+  outline: none; border-color: var(--gold-dim); background: var(--card);
+}
+.quick-bar input:disabled { opacity: .55; }
+.quick-go {
+  width: 42px; height: 38px; cursor: pointer; font-size: 15px;
+  background: var(--card-2); color: var(--gold); border: 1px solid var(--line);
+  border-radius: 0 8px 8px 0;
+}
+.quick-go:hover { background: var(--gold); color: var(--bg); border-color: var(--gold); }
+@media (max-width: 720px) {
+  .quick-bar { order: 3; flex-basis: 100%; max-width: none; margin-top: 8px; }
+  .quick-bar input { font-size: 12px; }
+}
+
 /* ── coach-proposed actions ─────────────────────────────────────────── */
 /* The coach can propose a write; only this card can commit one. It always
    states exactly what will be saved before it is saved. */

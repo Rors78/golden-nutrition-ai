@@ -185,6 +185,27 @@ function currentTab() {
   return SECTIONS[h] ? h : 'dashboard';
 }
 
+// Swap the in-memory state and redraw, without touching the server. Demo mode
+// uses this to show a full dataset on an install that has logged nothing —
+// the data file is never written, so exiting restores the real state.
+export function setState(next) {
+  State = next;
+  render();
+}
+
+// Navigate to a tab programmatically. The hash is the router's source of
+// truth, so go through it rather than calling a renderer directly.
+export function showTab(name, force = false) {
+  if (force || location.hash.replace('#', '') === name) {
+    if (location.hash.replace('#', '') !== name) {
+      // Set the hash without waiting for the hashchange round-trip, so a
+      // caller that needs the section mounted this frame gets it.
+      history.replaceState(null, '', `#${name}`);
+    }
+    render();
+  } else location.hash = name;
+}
+
 export async function refresh() {
   State = await api('GET', '/state');
   const badge = document.getElementById('ai-badge');
@@ -207,6 +228,10 @@ function render() {
     b.setAttribute('aria-selected', b.dataset.tab === tab);
   });
   view.innerHTML = '';
+  // Section renderers read State.stats directly. Guard rather than let each
+  // one crash: #demo is not a tab, so landing on it routes here before the
+  // demo dataset has been derived.
+  if (!State || !State.stats) return;
   SECTIONS[tab](view, State);
 }
 
@@ -217,6 +242,55 @@ addEventListener('hashchange', render);
 // ── profile dialog ──────────────────────────────────────────────────────
 const dialog = document.getElementById('profile-dialog');
 const form = document.getElementById('profile-form');
+// ── demo mode: the shop-window loop ─────────────────────────────────────
+// Lazily imported so the demo dataset never loads for normal use.
+let stopDemo = null;
+export async function enterDemo() {
+  if (stopDemo) return;
+  // The initial refresh() is fire-and-forget at the bottom of this file, and
+  // `load` beats it — so State can still be null here. The demo captures the
+  // real state to restore on exit, and capturing null loses it.
+  if (!State) await refresh().catch(() => {});
+  const { startDemo } = await import('./sections/demo.js');
+  stopDemo = startDemo();
+  const original = stopDemo;
+  stopDemo = () => { original(); stopDemo = null; };
+}
+if (location.hash === '#demo') addEventListener('load', enterDemo);
+addEventListener('hashchange', () => {
+  if (location.hash === '#demo') enterDemo();
+});
+
+// ── quick log: one box, reachable from every tab ────────────────────────
+// The analytics are all dormant until data exists, and what kept the file
+// empty was that every entry cost a tab change and a form. Common shapes are
+// parsed server-side by regex — instant, offline, no API key — with AI only
+// as the fallback for prose.
+(function initQuickLog() {
+  const form = document.getElementById('quick-form');
+  const input = document.getElementById('quick-input');
+  if (!form) return;
+  form.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try {
+      const res = await api('POST', '/quick', { text });
+      input.value = '';
+      toast(res.message);
+      await refresh();
+    } catch (e) { toast(e.message); }
+    finally { input.disabled = false; input.focus(); }
+  });
+  // "/" focuses the box from anywhere, unless you are already typing.
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== '/' || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
+    ev.preventDefault();
+    input.focus();
+  });
+})();
+
 document.getElementById('profile-btn').addEventListener('click', () => {
   const p = State?.profile || {};
   for (const f of form.elements) if (f.name) f.value = p[f.name] ?? '';

@@ -419,7 +419,10 @@ export function renderVessel(root, state) {
 
   F.modeBtn.addEventListener('click', () => { showChange = !showChange; });
 
-  api('GET', '/vessel').then(v => { V = v; }).catch(() => {});
+  // Demo mode injects a payload on State rather than writing to the server,
+  // so honour it when present instead of fetching over the top of it.
+  if (state.vessel_demo) V = state.vessel_demo;
+  else api('GET', '/vessel').then(v => { V = v; }).catch(() => {});
   raf = requestAnimationFrame(frame);
 
   // Stop cleanly when the section is replaced, or the loop outlives its canvas.

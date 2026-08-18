@@ -1,10 +1,12 @@
 """JSON API consumed by the single-page frontend."""
+import copy
 import csv
 import hashlib
 import io
 import json
 import os
 import platform
+import re
 import secrets
 import sys
 from datetime import date, datetime, timedelta
@@ -237,6 +239,65 @@ def add_meal():
     return jsonify({'ok': True})
 
 
+@bp.post('/vessel/preview')
+def vessel_preview():
+    """Derive a VESSEL payload from a supplied dataset, without saving it.
+
+    Demo mode needs a full twelve-week figure on an install that has logged
+    nothing. Rather than reimplement Navy BF, ACWR and the change map in JS —
+    which would create the second source of truth the whole architecture
+    avoids — it posts a dataset here and gets the same derived payload the
+    real endpoint returns. Nothing is written.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    if not isinstance(body, dict):
+        return _err('Preview needs a data object.')
+    d = copy.deepcopy(store.DEFAULT_DATA)
+    for key in ('profile', 'settings'):
+        if isinstance(body.get(key), dict):
+            d[key].update(body[key])
+    for key in ('meals', 'workouts', 'weights', 'vitals', 'measurements',
+                'supplements', 'supplement_schedule'):
+        if isinstance(body.get(key), list):
+            d[key] = body[key]
+    # Every derived block, not just the figure: the demo swaps client state,
+    # and a dashboard computed from the real (empty) file would contradict the
+    # demo data sitting beside it.
+    return jsonify({
+        'vessel': stats.vessel(d),
+        'stats': {
+            'today': stats.today_summary(d),
+            'weight': stats.weight_stats(d),
+            'weight_extras': stats.weight_extras(d),
+            'body_comp': stats.body_comp(d),
+            'strain': stats.training_strain(d),
+            'energy': stats.energy_balance(d),
+            'next_targets': stats.next_targets(d),
+            'insights': stats.insights(d),
+            'progression': stats.progression(d),
+            'quick_meals': stats.quick_meals(d),
+            'nutrition': stats.nutrition_trend(d),
+            'checklist': stats.checklist(d),
+            'adherence': stats.supplement_adherence(d),
+            'adherence_series': stats.adherence_series(d),
+            'training': stats.training_summary(d),
+            'muscle_balance': stats.muscle_balance(d),
+            'recent_prs': stats.recent_prs(d),
+            'weekly_volume': stats.weekly_volume(d),
+            'vitals': stats.vitals_summary(d),
+            'readiness': stats.readiness(d),
+            'readiness_series': stats.readiness_series(d),
+            'vitals_weeks': stats.vitals_weeks(d),
+            'step_stats': stats.step_stats(d),
+            'achievements': stats.achievements(d),
+            'plan_progress': stats.plan_progress(d),
+            'dashboard': stats.dashboard_extras(d),
+            'watch_insights': stats.watch_insights(d),
+            'coach_fit': stats.coach_fit(d),
+        },
+    })
+
+
 @bp.get('/vessel')
 def vessel():
     """Fully-derived payload for the VESSEL instrument.
@@ -406,6 +467,147 @@ def meals_photo():
                 _os.unlink(path)
             except OSError:
                 pass
+
+
+# ── quick log: one box, everything ──────────────────────────────────────────
+#
+# The app's analytics are all dormant until data exists, and the thing keeping
+# the file empty is that every entry costs a tab change and a form. This is one
+# text box that takes anything.
+#
+# Deliberately deterministic FIRST. The common shapes — "215", "waist 37.2",
+# "bench 225x5x3" — are unambiguous, and a regex answers them instantly,
+# offline, with no API key and no per-call cost. AI is the fallback for prose
+# ("two eggs and toast"), not the default path. An app that needs a model to
+# record a number the user just typed is slower and more fragile than one that
+# does not.
+QUICK_PATTERNS = [
+    # a bare number in a plausible bodyweight range is a weigh-in
+    (r'^(?:weigh(?:ed|s|ing)?(?:\s+in)?(?:\s+at)?\s*)?(\d{2,3}(?:\.\d)?)\s*(?:lbs?|pounds?)?$',
+     'weight'),
+    # "waist 37.2" / "waist 37.2in" — any of the six tape sites
+    (r'^(neck|chest|waist|hips?|arm|thigh)\s*[:=]?\s*(\d{1,2}(?:\.\d{1,2})?)\s*(?:in|"|inches)?$',
+     'measurement'),
+    # "bench 225x5" or "bench press 225 x 5 x 3" (weight x reps x sets)
+    (r'^(.+?)\s+(\d{1,4}(?:\.\d)?)\s*[x×*]\s*(\d{1,3})(?:\s*[x×*]\s*(\d{1,2}))?$',
+     'workout'),
+]
+
+TAPE_ALIAS = {'neck': 'neck_in', 'chest': 'chest_in', 'waist': 'waist_in',
+              'hip': 'hips_in', 'hips': 'hips_in', 'arm': 'arm_in',
+              'thigh': 'thigh_in'}
+
+
+def _quick_parse(text):
+    """Text -> a structured action, or None when only AI can read it."""
+    t = ' '.join(text.strip().split())
+    for pattern, kind in QUICK_PATTERNS:
+        m = re.match(pattern, t, re.I)
+        if not m:
+            continue
+        if kind == 'weight':
+            lbs = float(m.group(1))
+            # Outside this range it is far more likely a rep count or a typo
+            # than a bodyweight; let it fall through to the AI path.
+            if 60 <= lbs <= 700:
+                return {'action': 'weight', 'pounds': lbs}
+        elif kind == 'measurement':
+            return {'action': 'measurement',
+                    'site': TAPE_ALIAS[m.group(1).lower()],
+                    'inches': float(m.group(2))}
+        elif kind == 'workout':
+            name = m.group(1).strip()
+            # "eggs 2x3" is not a lift; require something word-like and short.
+            if 2 <= len(name) <= 48:
+                return {'action': 'workout', 'exercise': name.title(),
+                        'weight': float(m.group(2)), 'reps': int(m.group(3)),
+                        'sets': int(m.group(4) or 1)}
+    return None
+
+
+@bp.post('/quick')
+def quick_log():
+    """One box for everything. Deterministic where possible, AI where needed."""
+    text = str(request.get_json(force=True).get('text', '')).strip()
+    if not text:
+        return _err('Type something to log.')
+
+    parsed = _quick_parse(text)
+    used_ai = False
+    if parsed is None:
+        # Prose. Needs a model — and says so plainly if there is not one.
+        if not ai.backend_name():
+            return _err("Couldn't read that. Try '215', 'waist 37.2', or "
+                        "'bench 225x5x3' — or set up an AI backend for "
+                        "free-text meals.")
+        try:
+            route = ai.route_voice(text)
+        except Exception as e:
+            return _err(e, 502)
+        used_ai = True
+        parsed = {'action': route.get('action'), 'description':
+                  route.get('description', text), 'pounds': route.get('pounds'),
+                  'name': route.get('name')}
+
+    d = store.load()
+    act = parsed.get('action')
+    today = date.today().isoformat()
+
+    if act == 'weight':
+        lbs = clean_num(parsed.get('pounds'), float)
+        if lbs <= 0:
+            return _err("Didn't catch a weight in that.")
+        d['weights'] = [w for w in d['weights'] if w['date'] != today]
+        d['weights'].append({'date': today, 'weight': lbs})
+        d['weights'].sort(key=lambda w: w['date'])
+        d['profile']['weight'] = lbs
+        store.save(d)
+        return jsonify({'ok': True, 'action': 'weight', 'ai': used_ai,
+                        'message': f'Weigh-in logged — {lbs:g} lbs.'})
+
+    if act == 'measurement':
+        row = next((m for m in d.setdefault('measurements', [])
+                    if m['date'] == today), None)
+        if row is None:
+            row = {'date': today}
+            d['measurements'].append(row)
+        row[parsed['site']] = parsed['inches']
+        d['measurements'].sort(key=lambda m: m['date'])
+        store.save(d)
+        site = parsed['site'].replace('_in', '')
+        return jsonify({'ok': True, 'action': 'measurement', 'ai': used_ai,
+                        'message': f'{site.title()} logged — {parsed["inches"]:g}".'})
+
+    if act == 'workout':
+        d['workouts'].append({
+            'date': today, 'time': datetime.now().strftime('%H:%M'),
+            'name': parsed['exercise'], 'duration': 0, 'intensity': 'Moderate',
+            'notes': 'Quick log',
+            'exercises': [{'exercise': parsed['exercise'], 'sets': parsed['sets'],
+                           'reps': parsed['reps'], 'weight': parsed['weight']}],
+        })
+        store.save(d)
+        p = parsed
+        return jsonify({'ok': True, 'action': 'workout', 'ai': used_ai,
+                        'message': (f'{p["exercise"]} logged — '
+                                    f'{p["sets"]}×{p["reps"]} @ {p["weight"]:g}.')})
+
+    if act == 'meal':
+        try:
+            meals = ai.parse_meals(str(parsed.get('description') or text))
+        except Exception as e:
+            return _err(e, 502)
+        now = datetime.now().strftime('%H:%M')
+        for m in meals:
+            d['meals'].append(_normalize_meal({**m, 'date': today, 'time': now,
+                                               'notes': 'Quick log'}))
+        store.save(d)
+        total = sum(m['protein'] for m in meals)
+        return jsonify({'ok': True, 'action': 'meal', 'ai': True,
+                        'message': f'Logged {len(meals)} item(s) — {total}g protein.'})
+
+    return _err("Couldn't tell what that was. Try '215', 'waist 37.2', "
+                "'bench 225x5x3', or describe a meal.")
 
 
 @bp.post('/voice')
