@@ -429,7 +429,7 @@ def test_ai_contexts_include_body_data(client, monkeypatch):
     assert json.loads(captured["brief"])["body_comp"]["bf_pct"] == pytest.approx(17.5, abs=0.1)
 
     monkeypatch.setattr(ai, "coaching_summary",
-                        lambda wd, persona: captured.update(week=wd) or "ok")
+                        lambda wd, persona, privilege="interactive": captured.update(week=wd) or "ok")
     assert client.post("/api/coach").status_code == 200
     wd = captured["week"]
     assert wd["measurements"] and wd["body_comp"]["bf_pct"] is not None
@@ -796,7 +796,7 @@ def test_watch_insights(client):
 def test_deals_unit_price_passthrough(client, monkeypatch):
     fake = [{"item": "Whey 5lb", "store": "BulkCo", "price": "$49.99", "deal": "",
              "url": "", "unit_price": "$0.60/serving"}]
-    monkeypatch.setattr(ai, "find_deals", lambda items, location="": fake)
+    monkeypatch.setattr(ai, "find_deals", lambda items, location="", privilege="interactive": fake)
     r = client.post("/api/deals", json={"items": "whey"})
     assert r.status_code == 200
     assert r.get_json()["results"][0]["unit_price"] == "$0.60/serving"
@@ -970,7 +970,7 @@ def test_ai_unavailable_is_5xx_not_crash(client, monkeypatch):
 def test_deals_endpoint(client, monkeypatch):
     fake = [{"item": "Whey 5lb", "store": "Shop", "price": "$49.99",
              "deal": "20% off", "url": "https://example.com"}]
-    monkeypatch.setattr(ai, "find_deals", lambda items, location="": fake)
+    monkeypatch.setattr(ai, "find_deals", lambda items, location="", privilege="interactive": fake)
     r = client.post("/api/deals", json={"items": "whey protein"})
     assert r.get_json()["results"] == fake
     # cached in state for next load
@@ -1003,7 +1003,7 @@ def test_price_watch_lifecycle(client, monkeypatch):
     monkeypatch.setattr(notify, "push",
                         lambda st, title, msg, priority='default':
                         pushed.update(title=title, msg=msg) or True)
-    monkeypatch.setattr(ai, "find_deals", lambda items, location="": [
+    monkeypatch.setattr(ai, "find_deals", lambda items, location="", privilege="interactive": [
         {"item": "Whey Protein 5 lb tub", "store": "ShopB", "price": "$49.99",
          "deal": "sale", "url": "https://b.example"}])
     r = client.post("/api/watches/recheck")
@@ -1028,7 +1028,7 @@ def test_price_watch_lifecycle(client, monkeypatch):
 
 
 def test_deals_location_persists(client, monkeypatch):
-    monkeypatch.setattr(ai, "find_deals", lambda items, location="": [
+    monkeypatch.setattr(ai, "find_deals", lambda items, location="", privilege="interactive": [
         {"item": "x", "store": "s", "price": "$1", "deal": "", "url": ""}])
     client.post("/api/deals", json={"items": "whey", "location": "UK · MyProtein"})
     assert client.get("/api/state").get_json()["settings"]["deals_location"] == "UK · MyProtein"
@@ -1086,7 +1086,7 @@ def test_coach_summary_uses_selected_persona(client, monkeypatch):
     client.post("/api/coach/select", json={"id": "simmons"})
     captured = {}
 
-    def fake_summary(week_data, persona=None):
+    def fake_summary(week_data, persona=None, privilege="interactive"):
         captured["persona"] = persona
         return "**What went well**: everything, darling!"
     monkeypatch.setattr(ai, "coaching_summary", fake_summary)
@@ -1250,7 +1250,7 @@ def test_plan_progress(client, monkeypatch):
 def test_weekly_review_archived(client, monkeypatch):
     client.post("/api/meals", json={"name": "Rice", "protein": 10, "calories": 200})
     monkeypatch.setattr(ai, "coaching_summary",
-                        lambda week, persona=None: "**What went well**: showing up.")
+                        lambda week, persona=None, privilege="interactive": "**What went well**: showing up.")
     client.post("/api/coach")
     reviews = client.get("/api/state").get_json()["reviews"]
     assert len(reviews) == 1
@@ -1691,3 +1691,99 @@ def test_briefing_never_uses_the_cli(monkeypatch):
 
     with pytest.raises(ai.AIUnavailable, match="ANTHROPIC_API_KEY"):
         ai.daily_briefing({"name": "Test"}, "persona", "{}")
+
+
+# ── privilege scales inversely with autonomy ────────────────────────────────
+# An unattended job has nobody watching what it does with what it was handed,
+# so it gets handed less. Convenience produces the opposite.
+
+def test_constrained_env_drops_ambient_secrets(monkeypatch):
+    """A constrained child inherits the allow-list and nothing else."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "live-bot-secret")
+    monkeypatch.setenv("SOME_EXCHANGE_KEY", "live-exchange-secret")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    env = ai._cli_env("constrained")
+    assert "TELEGRAM_BOT_TOKEN" not in env
+    assert "SOME_EXCHANGE_KEY" not in env
+    assert env.get("PATH") == "/usr/bin", "PATH must survive or the binary is unfindable"
+
+
+def test_constrained_env_keeps_what_the_child_needs(monkeypatch):
+    """Deny-by-default must not deny the essentials.
+
+    An empty env does not 'just work': without SystemRoot, Windows socket setup
+    and DNS fail in ways that look like connectivity bugs. That is how this
+    protection gets reverted in frustration instead of debugged.
+    """
+    for k in ("PATH", "SystemRoot", "windir", "USERPROFILE", "TEMP"):
+        monkeypatch.setenv(k, f"value-of-{k}")
+    env = ai._cli_env("constrained")
+    for k in ("PATH", "SystemRoot", "windir", "USERPROFILE", "TEMP"):
+        assert env.get(k) == f"value-of-{k}", f"{k} must reach the child"
+
+
+def test_interactive_env_still_inherits_but_never_api_keys(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "live-bot-secret")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-pass")
+    env = ai._cli_env("interactive")
+    assert env.get("TELEGRAM_BOT_TOKEN") == "live-bot-secret"
+    # Billing rule from SCARS: always the subscription, never a stray key.
+    assert "ANTHROPIC_API_KEY" not in env
+
+
+def test_unattended_header_constrains_the_subprocess(client, monkeypatch):
+    """The price-watch job is unattended AND grants WebSearch/WebFetch.
+
+    Highest-privilege path in the app: a networked tool, on a timer, unwatched.
+    """
+    client.post("/api/watches", json={"item": "whey protein"})
+    seen = {}
+    monkeypatch.setattr(ai, "find_deals",
+                        lambda items, loc, privilege="interactive":
+                        seen.update(privilege=privilege) or [])
+
+    client.post("/api/watches/recheck", headers={"X-GNA-Unattended": "1"})
+    assert seen["privilege"] == "constrained"
+
+    seen.clear()
+    client.post("/api/watches/recheck")
+    assert seen["privilege"] == "interactive"
+
+
+# ── nothing derived or secret leaves the machine ────────────────────────────
+
+def test_export_strips_credentials_and_derived_output(client):
+    """The backup file routinely leaves the box — including into AI assistants."""
+    client.post("/api/settings", json={"ntfy_topic": "my-private-topic"})
+    token = client.get("/api/state").get_json()["settings"]["ingest_token"]
+    assert token, "fixture precondition: a token exists to leak"
+
+    body = client.get("/api/export/backup.json").get_json()
+    assert "ntfy_topic" not in body["settings"]
+    assert "ingest_token" not in body["settings"]
+    assert "briefing" not in body
+    # Still a usable backup.
+    assert "profile" in body and "meals" in body
+
+
+def test_restore_keeps_machine_local_secrets(client):
+    """Restoring a stripped backup must not wipe the live credentials."""
+    client.post("/api/settings", json={"ntfy_topic": "my-private-topic"})
+    before = client.get("/api/state").get_json()["settings"]
+    backup = client.get("/api/export/backup.json").get_json()
+
+    assert client.post("/api/import/backup", json=backup).status_code == 200
+
+    after = client.get("/api/state").get_json()["settings"]
+    assert after["ntfy_topic"] == "my-private-topic"
+    assert after["ingest_token"] == before["ingest_token"]
+
+
+def test_validate_rejects_structurally_wrong_payloads():
+    from app import data as store
+    assert store.validate(store.DEFAULT_DATA) == []
+    assert store.validate("not a dict")
+    assert store.validate({"profile": {}, "settings": {}})          # lists missing
+    assert store.validate({"profile": [], "settings": {}, "meals": [],
+                           "workouts": [], "weights": [], "supplements": []})

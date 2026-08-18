@@ -19,7 +19,8 @@ from app import data as store, notify  # noqa: E402
 def main():
     app = create_app()
     with app.test_client() as client:
-        res = client.post('/api/coach')
+        # Unattended: run the AI subprocess with a minimal environment.
+        res = client.post('/api/coach', headers={'X-GNA-Unattended': '1'})
         body = res.get_json() or {}
     if res.status_code != 200:
         err = str(body.get('error', res.status))
