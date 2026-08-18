@@ -1294,6 +1294,129 @@ def onboarding(data):
     }
 
 
+# ── VESSEL: the body as the primary object ──────────────────────────────────
+#
+# One fully-derived payload; the canvas computes nothing. Navy BF, ACWR, goal
+# projection and confidence all stay here where the tests are — reimplementing
+# any of them in the renderer would create two sources of truth that diverge
+# silently, which is the backend_name() failure shape one layer up.
+#
+# Contract rules, enforced by tests:
+#   - every block carries an explicit `have`; never infer presence from nulls
+#   - never send 0 for unknown. Zero is a real weight, a real ACR, a real
+#     calorie count. Absent is `have: false`.
+#   - `confidence` is rendered, not hidden. The app never asserts a number it
+#     cannot stand behind.
+
+# The six sites this app actually stores. The reference render wanted nine
+# (shoulder, rib, calf too) — those have no field, no storage, and no UI, so
+# the figure derives them from neighbours and says so rather than inventing
+# measurements. `derived` is the honest word for a ring nobody taped.
+VESSEL_SITES = ('neck_in', 'chest_in', 'waist_in', 'hips_in', 'arm_in', 'thigh_in')
+
+# Population-typical circumference as a fraction of height, used only to draw
+# a generic figure before the first tape set. Explicitly marked estimated so
+# the renderer can dim it — a cold-install figure is a prompt, not a portrait.
+TYPICAL_BY_HEIGHT = {
+    'neck_in': 0.216, 'chest_in': 0.575, 'waist_in': 0.500,
+    'hips_in': 0.550, 'arm_in': 0.196, 'thigh_in': 0.313,
+}
+
+
+def vessel(data):
+    """Everything the VESSEL renderer needs, fully derived. Pure function."""
+    p = data.get('profile') or {}
+    height = p.get('height_in') or 0
+    tape_rows = sorted(data.get('measurements') or [], key=lambda m: m['date'])
+    latest = tape_rows[-1] if tape_rows else None
+    previous = tape_rows[-2] if len(tape_rows) > 1 else None
+    bc = body_comp(data)
+
+    # ── body ──
+    if latest:
+        confidence = {'current': 'measured', 'aging': 'measured',
+                      'stale': 'stale'}.get(bc.get('confidence'), 'measured')
+        tape = {k: latest.get(k) for k in VESSEL_SITES}
+        measured = [k for k in VESSEL_SITES if latest.get(k)]
+    elif height:
+        confidence = 'estimated'
+        tape = {k: round(height * f, 1) for k, f in TYPICAL_BY_HEIGHT.items()}
+        measured = []
+    else:
+        confidence = 'unmeasured'
+        tape = {k: None for k in VESSEL_SITES}
+        measured = []
+
+    age_days = None
+    if latest:
+        try:
+            age_days = (date.today() - date.fromisoformat(latest['date'])).days
+        except ValueError:
+            age_days = None
+
+    body = {
+        'have': bool(latest) or bool(height),
+        'confidence': confidence,
+        'measured_on': latest['date'] if latest else None,
+        'age_days': age_days,
+        'height_in': height or None,
+        'tape_in': tape,
+        'measured_sites': measured,
+        'previous_tape_in': ({k: previous.get(k) for k in VESSEL_SITES}
+                             if previous else None),
+        # How many rungs of the degradation ladder are lit. Drives opacity.
+        'fidelity': ('full' if latest else 'estimated' if height else 'generic'),
+    }
+
+    # ── composition ──
+    composition = {'have': bc.get('current') is not None,
+                   'bf_pct': bc.get('current'),
+                   'method': 'navy',
+                   'confidence': bc.get('confidence'),
+                   'age_days': bc.get('age_days')}
+
+    # ── fuel ──
+    totals = today_summary(data)['totals']
+    energy = energy_balance(data)
+    kcal_target = (energy.get('recommended_calories') if energy.get('has_data')
+                   else p.get('daily_calories')) or None
+    fuel = {
+        'have': True,  # today always exists; the numbers may be zero and that is real
+        'kcal': totals.get('calories', 0),
+        'kcal_target': kcal_target,
+        'protein_g': totals.get('protein', 0),
+        'protein_target_g': p.get('daily_protein_g') or None,
+        'target_source': ('adaptive_tdee' if energy.get('has_data')
+                          else 'profile' if p.get('daily_calories') else None),
+        'confidence': (energy.get('confidence') if energy.get('has_data')
+                       else 'low'),
+    }
+
+    # ── load ──
+    strain = training_strain(data)
+    load = {'have': bool(strain.get('has_data')),
+            'acr': strain.get('acwr'),
+            'monotony': strain.get('monotony'),
+            'state': strain.get('zone'),
+            'corridor': [0.8, 1.3]}
+
+    # ── voyage ──
+    w = weight_stats(data)
+    voyage = {'have': bool(w.get('has_data') is not False and w.get('current')),
+              'start_lb': (w.get('series') or [{}])[0].get('weight') if w.get('series') else None,
+              'current_lb': w.get('current'),
+              'goal_lb': w.get('goal') or None,
+              'rate_lb_wk': w.get('rate_per_week'),
+              'eta': w.get('eta_date_iso'),
+              'confidence': ('high' if len(w.get('series') or []) >= 8
+                             else 'medium' if len(w.get('series') or []) >= 3
+                             else 'low')}
+
+    return {'as_of': datetime.now().isoformat(timespec='seconds'),
+            'body': body, 'composition': composition, 'fuel': fuel,
+            'load': load, 'voyage': voyage}
+
+
 def checklist(data):
     today = date.today().isoformat()
     items = []

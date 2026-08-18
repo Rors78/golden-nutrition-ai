@@ -1971,3 +1971,92 @@ def test_no_tape_means_no_confidence_claim(client):
     assert bc["current"] is None
     assert bc["age_days"] is None
     assert bc["confidence"] is None
+
+
+# ── VESSEL contract ────────────────────────────────────────────────────────
+# The canvas computes nothing, so these rules are the whole interface. If any
+# of them break, the renderer starts drawing a body nobody measured.
+
+VESSEL_BLOCKS = ("body", "composition", "fuel", "load", "voyage")
+
+
+def test_vessel_every_block_declares_presence(client):
+    v = client.get("/api/vessel").get_json()
+    for b in VESSEL_BLOCKS:
+        assert "have" in v[b], f"{b} must declare presence explicitly"
+    assert v["as_of"]
+
+
+def test_vessel_never_sends_zero_for_unknown(client):
+    """Zero is a real weight, a real ACR, a real body-fat percentage.
+
+    On an empty install every derived metric must be null with have:false —
+    a 0.00 acute:chronic ratio would render as a real reading in the corridor.
+    """
+    v = client.get("/api/vessel").get_json()
+    assert v["load"]["have"] is False and v["load"]["acr"] is None
+    assert v["composition"]["have"] is False and v["composition"]["bf_pct"] is None
+    assert v["voyage"]["have"] is False and v["voyage"]["current_lb"] is None
+    assert all(t is None for t in v["body"]["tape_in"].values())
+
+
+def test_vessel_degradation_ladder(client):
+    """Cold → height only → taped. The figure must never claim more than it has."""
+    v = client.get("/api/vessel").get_json()
+    assert v["body"]["fidelity"] == "generic"
+    assert v["body"]["confidence"] == "unmeasured"
+    assert v["body"]["measured_sites"] == []
+
+    # height alone draws a population-typical figure, explicitly estimated
+    client.post("/api/profile", json={"sex": "male", "height_in": 71,
+                                      "weight": 214, "goal_weight": 190})
+    v = client.get("/api/vessel").get_json()
+    assert v["body"]["fidelity"] == "estimated"
+    assert v["body"]["confidence"] == "estimated"
+    assert v["body"]["measured_sites"] == [], "estimates are not measurements"
+    assert v["body"]["tape_in"]["waist_in"] > 0
+
+    # one tape set promotes it to the real thing
+    client.post("/api/measurements", json={"waist_in": 37.2, "neck_in": 15.4,
+                                           "chest_in": 43.0, "hips_in": 41.0})
+    v = client.get("/api/vessel").get_json()
+    assert v["body"]["fidelity"] == "full"
+    assert v["body"]["confidence"] == "measured"
+    assert "waist_in" in v["body"]["measured_sites"]
+    assert v["body"]["age_days"] == 0
+
+
+def test_vessel_stale_tape_is_not_called_measured(client):
+    """An old tape set still draws a figure, but must not claim to be current."""
+    client.post("/api/profile", json={"sex": "male", "height_in": 71})
+    old = (date.today() - timedelta(days=95)).isoformat()
+    client.post("/api/measurements",
+                json={"date": old, "waist_in": 38.4, "neck_in": 15.6,
+                      "chest_in": 43.5, "hips_in": 41.2})
+    v = client.get("/api/vessel").get_json()
+    assert v["body"]["fidelity"] == "full", "the figure is still drawn"
+    assert v["body"]["confidence"] == "stale", "but it is not current"
+    assert v["body"]["age_days"] == 95
+    assert v["composition"]["confidence"] == "stale"
+
+
+def test_vessel_reports_previous_tape_for_the_ghost_silhouette(client):
+    """Two tape sets unlock change-over-time; one does not."""
+    client.post("/api/profile", json={"sex": "male", "height_in": 71})
+    client.post("/api/measurements",
+                json={"date": (date.today() - timedelta(days=30)).isoformat(),
+                      "waist_in": 38.4, "neck_in": 15.6, "chest_in": 43.5, "hips_in": 41.2})
+    assert client.get("/api/vessel").get_json()["body"]["previous_tape_in"] is None
+
+    client.post("/api/measurements",
+                json={"waist_in": 37.2, "neck_in": 15.4, "chest_in": 43.0, "hips_in": 41.0})
+    prev = client.get("/api/vessel").get_json()["body"]["previous_tape_in"]
+    assert prev is not None and prev["waist_in"] == 38.4
+
+
+def test_vessel_fuel_target_names_its_source(client):
+    """A number the user might eat by has to say where it came from."""
+    v = client.get("/api/vessel").get_json()
+    assert v["fuel"]["target_source"] == "profile"
+    assert v["fuel"]["confidence"] == "low", "no adaptive TDEE yet"
+    assert v["fuel"]["kcal"] == 0, "zero eaten today is a real zero"
