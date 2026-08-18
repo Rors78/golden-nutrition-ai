@@ -1323,6 +1323,74 @@ TYPICAL_BY_HEIGHT = {
 }
 
 
+def tape_change(data, days=None):
+    """Per-site change between two tape sets, in RADIAL millimetres.
+
+    Circumference is what you measure; radius is what you see. A 1 inch drop
+    around the waist is only ~4 mm off the surface, and quoting the inch makes
+    a change feel larger than it looks in the mirror. Converting to radial
+    displacement is what turns six numbers into a map of where the body moved.
+
+    Noise floor: repeat tape measurements at the same site scatter by roughly
+    ±0.25 in circumference even done carefully, which is ~1 mm radial. Anything
+    under that is reported as `flat` rather than as a direction, because a
+    trend built from measurement noise is worse than no trend.
+    """
+    rows = sorted(data.get('measurements') or [], key=lambda m: m['date'])
+    if len(rows) < 2:
+        return {'has_data': False,
+                'note': ('Two tape sets are needed before change means anything.'
+                         if rows else 'Log a tape set to start the map.')}
+    latest = rows[-1]
+    # Compare against the oldest set inside the window, so the reading answers
+    # "what changed over this period" rather than "since the last time I taped",
+    # which varies with how often the user happens to measure.
+    if days:
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        earlier = [r for r in rows[:-1] if r['date'] >= cutoff]
+        base = earlier[0] if earlier else rows[-2]
+    else:
+        base = rows[0]
+
+    NOISE_MM = 1.0
+    sites = []
+    for key in VESSEL_SITES:
+        a, b = base.get(key), latest.get(key)
+        if not a or not b:
+            continue
+        # circumference inches -> radius inches -> millimetres
+        d_mm = round((b - a) / math.pi / 2 * 25.4, 1)
+        sites.append({
+            'site': key,
+            'from': a, 'to': b,
+            'delta_in': round(b - a, 2),
+            'delta_mm': d_mm,
+            'direction': ('flat' if abs(d_mm) < NOISE_MM
+                          else 'down' if d_mm < 0 else 'up'),
+            # Below the noise floor the sign is not trustworthy; say so rather
+            # than drawing a colour that implies a direction.
+            'significant': abs(d_mm) >= NOISE_MM,
+        })
+    if not sites:
+        return {'has_data': False,
+                'note': 'No site was measured in both sets — same sites, both times.'}
+    try:
+        span = (date.fromisoformat(latest['date']) - date.fromisoformat(base['date'])).days
+    except ValueError:
+        span = None
+    moved = [s for s in sites if s['significant']]
+    return {
+        'has_data': True,
+        'from_date': base['date'], 'to_date': latest['date'], 'span_days': span,
+        'sites': sites,
+        'noise_floor_mm': NOISE_MM,
+        # The largest real movement, for the headline. None when nothing cleared
+        # the floor — an honest "nothing measurably changed yet".
+        'biggest': (max(moved, key=lambda s: abs(s['delta_mm'])) if moved else None),
+        'unchanged': not moved,
+    }
+
+
 def vessel(data):
     """Everything the VESSEL renderer needs, fully derived. Pure function."""
     p = data.get('profile') or {}
@@ -1414,7 +1482,7 @@ def vessel(data):
 
     return {'as_of': datetime.now().isoformat(timespec='seconds'),
             'body': body, 'composition': composition, 'fuel': fuel,
-            'load': load, 'voyage': voyage}
+            'load': load, 'voyage': voyage, 'change': tape_change(data)}
 
 
 def checklist(data):
