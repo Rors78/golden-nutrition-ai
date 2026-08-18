@@ -204,3 +204,50 @@ An observability fix would not have caught this one; only a correctness gate doe
 before the write, not after. And prefer the narrowest primitive that does the
 job — an agent where a completion suffices is an open context surface you are
 not using but still inherit.
+
+---
+
+## 11. Privilege scales inversely with autonomy
+
+**Incident.** An env audit found the ambient environment on this machine carried
+`TELEGRAM_BOT_TOKEN` and `GOLDENEYE_TELEGRAM_TOKEN` — live credentials from an
+unrelated project — and `subprocess.run(..., env=dict(os.environ))` handed all 79
+variables to every `claude -p` child. Including `find_deals`, which runs
+unattended from the 09:00 price-watch job *and* grants `--allowedTools
+WebSearch,WebFetch`: a networked tool, on a timer, with nobody watching.
+
+**Cause.** Convenience defaults. Inheriting the parent environment is what
+`subprocess` does unless told otherwise, so privilege accumulates exactly where
+supervision is lowest — the inverse of what you want.
+
+**Fix.** `ai._cli_env(privilege)` resolves the child environment at one
+chokepoint. `interactive` (a human is watching) inherits ambient minus API keys;
+`constrained` (scheduled jobs) passes only `_ENV_ALLOW`. Fixed in the resolver
+rather than per-call-site, so new jobs inherit the safe default. Scheduled
+scripts declare themselves with `X-GNA-Unattended`.
+
+**Do not trim `_ENV_ALLOW` without testing.** An empty env does not "just work":
+without `PATH` the binary is unfindable, and without `SystemRoot`/`windir`
+Windows socket setup and DNS fail in ways that look like connectivity bugs. That
+is how this protection gets reverted in frustration instead of debugged.
+
+**Related, same audit — the data file is not just user records.** `settings`
+holds `ingest_token` (authenticates `/api/ingest`) and `ntfy_topic`, which is a
+*bearer secret*: `app/notify.py` sends no auth header, so knowing the topic is
+enough to both subscribe and publish. That file goes into every backup, out
+through `/api/export/backup.json`, and routinely gets handed to AI assistants
+when asking for help.
+
+`data.for_export()` strips credentials and derived AI output, and **both** the
+export endpoint and the nightly backup use it — the backup was `shutil.copy2`,
+a byte-for-byte copy with no schema awareness at all: it could not strip, could
+not validate, and faithfully preserved valid-but-wrong content. It is now
+load → validate → strip → write, and **refuses (exit 5) rather than writing a
+snapshot that fails validation**. A bad backup is worse than a missing one; it
+looks like a recovery point. System Pulse tracks backup freshness, so a refusal
+surfaces as stale — the correct loud signal.
+
+**Watch out on restore:** backups no longer carry credentials, so
+`/api/import/backup` preserves the machine-local ones instead of writing the
+backup wholesale. Without that, restoring would silently wipe the live push
+channel.

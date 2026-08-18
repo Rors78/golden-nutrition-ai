@@ -29,6 +29,19 @@ def _err(message, status=400):
     return jsonify({'error': str(message)}), status
 
 
+def _privilege():
+    """How much environment an AI subprocess started by this request may inherit.
+
+    Scheduled jobs set X-GNA-Unattended; nobody is watching what they do, so
+    they run constrained (see ai._cli_env). Requests from the UI have a human
+    present and run interactive. Defaulting to constrained would be safer still,
+    but would silently change interactive behavior, so the unattended callers
+    declare themselves and the tests assert they do.
+    """
+    return ('constrained' if request.headers.get('X-GNA-Unattended')
+            else 'interactive')
+
+
 VITAL_ALIASES = {
     'steps': ('steps', 'step_count', 'stepCount'),
     'resting_hr': ('resting_hr', 'restingHeartRate', 'resting_heart_rate', 'rhr', 'heart_rate'),
@@ -1097,7 +1110,8 @@ def watches_recheck():
         return _err('No price watches yet — watch a deal first.')
     items = ', '.join(w['item'] for w in d['watches'])
     try:
-        found = ai.find_deals(items, d['settings'].get('deals_location', ''))
+        found = ai.find_deals(items, d['settings'].get('deals_location', ''),
+                              privilege=_privilege())
     except Exception as e:
         return _err(e, 502)
 
@@ -1163,7 +1177,8 @@ def coach():
         return _err("Log some meals or workouts first — there's nothing from the last 7 days to review.")
     coach = get_coach(d['profile'].get('coach', DEFAULT_COACH))
     try:
-        summary = ai.coaching_summary(week_data, persona_prompt(coach))
+        summary = ai.coaching_summary(week_data, persona_prompt(coach),
+                                      privilege=_privilege())
     except Exception as e:
         return _err(e, 502)
     reviews = d.setdefault('reviews', [])
@@ -1289,8 +1304,13 @@ def export_csv(kind):
 
 @bp.get('/export/backup.json')
 def export_backup():
-    """The whole data file, for safekeeping off this machine."""
-    d = store.load()
+    """The user's data, for safekeeping off this machine.
+
+    Credentials and derived AI output are stripped (see data.for_export) — this
+    file routinely leaves the machine, including into AI assistants when asking
+    for help, so it must not carry a live push-channel or webhook credential.
+    """
+    d = store.for_export(store.load())
     return Response(json.dumps(d, indent=2), mimetype='application/json',
                     headers={'Content-Disposition':
                              f'attachment; filename=golden-nutrition-{date.today().isoformat()}.json'})
@@ -1326,6 +1346,15 @@ def import_backup():
     current = store.load()
     snap = Path('nutrition_data.pre-restore.json')
     snap.write_text(json.dumps(current, indent=2))
+    # Backups no longer carry credentials (data.for_export strips them), so a
+    # restore must not wipe the live ones by writing the backup wholesale.
+    # Machine-local secrets survive a restore of the user's records.
+    body.setdefault('settings', {})
+    for k in store.EXPORT_STRIP_SETTINGS:
+        if not str(body['settings'].get(k) or '').strip():
+            kept = current.get('settings', {}).get(k)
+            if kept:
+                body['settings'][k] = kept
     store.save(body)
     restored = store.load()  # re-load runs the usual defaults/migration
     return jsonify({'ok': True,

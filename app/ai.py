@@ -79,12 +79,53 @@ def backend_name():
     return None
 
 
-def _run_cli(prompt, timeout=300):
-    """One-shot headless Claude Code prompt on the user's subscription."""
-    env = dict(os.environ)
+# The minimal environment a `claude -p` child needs to function. Deny-by-default:
+# anything not listed here never reaches the subprocess.
+#
+# Do NOT trim this list without testing. An empty env does not "just work":
+#   PATH                  - finding the binary and its node runtime
+#   SystemRoot / windir   - Windows socket setup and DNS. Without these, network
+#                           calls fail in ways that look like connectivity bugs,
+#                           which is how deny-by-default gets reverted in
+#                           frustration instead of debugged.
+#   USERPROFILE / HOME    - where the CLI reads its own credentials
+#   APPDATA/LOCALAPPDATA  - Windows credential + config location
+#   TEMP / TMP / TMPDIR   - scratch space
+_ENV_ALLOW = (
+    "PATH", "SystemRoot", "windir", "USERPROFILE", "HOME",
+    "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR",
+    "SystemDrive", "COMSPEC", "PATHEXT", "NUMBER_OF_PROCESSORS", "OS",
+)
+
+
+def _cli_env(privilege="interactive"):
+    """Environment for a `claude -p` child.
+
+    privilege="interactive"  - user is present and watching; inherits the
+                               ambient environment minus API keys.
+    privilege="constrained"  - unattended (scheduled jobs). Deny-by-default:
+                               only _ENV_ALLOW is passed through.
+
+    Privilege scales inversely with autonomy. An unattended job has nobody
+    watching what it does with what it was handed, so it gets handed less.
+    Convenience produces the opposite: unattended jobs accumulate ambient
+    credentials precisely because nobody is present to grant them narrowly.
+    On this machine the ambient env carried live bot tokens from an unrelated
+    project into every call, including a tool-enabled one.
+    """
+    if privilege == "constrained":
+        env = {k: os.environ[k] for k in _ENV_ALLOW if k in os.environ}
+    else:
+        env = dict(os.environ)
     # Bill the subscription login, never a possibly-unfunded API key
     env.pop("ANTHROPIC_API_KEY", None)
     env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    return env
+
+
+def _run_cli(prompt, timeout=300, privilege="interactive"):
+    """One-shot headless Claude Code prompt on the user's subscription."""
+    env = _cli_env(privilege)
     result = subprocess.run(
         [_claude_exe(), "-p", prompt, "--output-format", "text"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -172,8 +213,14 @@ DEALS_PROMPT = (
 )
 
 
-def find_deals(items, location=""):
-    """Web-search current deals on food/supplements. Returns a list of deal dicts."""
+def find_deals(items, location="", privilege="interactive"):
+    """Web-search current deals on food/supplements. Returns a list of deal dicts.
+
+    Runs unattended from the 09:00 price-watch job AND grants the child
+    WebSearch/WebFetch, so it is the highest-privilege path in the app: a tool
+    that can reach the network, on a schedule, with nobody watching. Callers
+    from scheduled jobs must pass privilege="constrained".
+    """
     ask = (
         f"{DEALS_PROMPT}\n\n"
         f"Items to find deals on: {items}\n"
@@ -189,14 +236,11 @@ def find_deals(items, location=""):
         "shows servings or weight. If you can't verify a price, skip it."
     )
     if cli_available():
-        env = dict(os.environ)
-        env.pop("ANTHROPIC_API_KEY", None)
-        env.pop("ANTHROPIC_AUTH_TOKEN", None)
         result = subprocess.run(
             [_claude_exe(), "-p", ask, "--output-format", "text",
              "--allowedTools", "WebSearch,WebFetch"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=420, env=env,
+            timeout=420, env=_cli_env(privilege),
             cwd=tempfile.gettempdir(),
         )
         if result.returncode != 0:
@@ -511,14 +555,11 @@ def parse_meal_photo(image_path):
             '{"meals": [{"name": "...", "protein": 0, "calories": 0, '
             '"carbs": 0, "fat": 0, "fiber": 0}]}'
         )
-        env = dict(os.environ)
-        env.pop("ANTHROPIC_API_KEY", None)
-        env.pop("ANTHROPIC_AUTH_TOKEN", None)
         result = subprocess.run(
             [_claude_exe(), "-p", prompt, "--output-format", "text",
              "--allowedTools", "Read"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=300, env=env,
+            timeout=300, env=_cli_env(),  # user-initiated: photo upload in the UI
             cwd=os.path.dirname(image_path) or tempfile.gettempdir(),
         )
         if result.returncode != 0:
@@ -649,11 +690,14 @@ def route_voice(transcript):
     )
 
 
-def coaching_summary(week_data, persona=None):
+def coaching_summary(week_data, persona=None, privilege="interactive"):
     """Weekly coaching write-up (markdown) from the last 7 days of data.
 
     `persona` is a system-prompt fragment (see coaches.persona_prompt) that
     puts the review in the selected coach's voice and philosophy.
+
+    Runs unattended from the Sunday 18:00 review job, which must pass
+    privilege="constrained".
     """
     system = persona or COACH_PROMPT
     user_content = (
@@ -665,7 +709,8 @@ def coaching_summary(week_data, persona=None):
         "words and use the actual numbers from the data."
     )
     if cli_available():
-        return _run_cli(f"{system}\n\n{user_content}", timeout=300)
+        return _run_cli(f"{system}\n\n{user_content}", timeout=300,
+                        privilege=privilege)
     if backend_name():
         response = _sdk_create(
             model=CLAUDE_MODEL,
