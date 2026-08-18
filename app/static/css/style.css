@@ -479,6 +479,85 @@ dialog form { display: grid; gap: 12px; }
   .onboarding .ob-step { grid-template-columns: 20px 1fr; }
 }
 
+/* ── LIFT HUD ───────────────────────────────────────────────────────── */
+/* Everything here is sized to be read at arm's length with a bar in your
+   hands. The dense panel is better for editing; this is better for lifting. */
+body.lift-open { overflow: hidden; }
+.lift-hud {
+  position: fixed; inset: 0; z-index: 60; background: #04060a;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; font-family: var(--font-mono); color: #e9f6fa;
+  animation: lh-in .22s ease-out;
+}
+@keyframes lh-in { from { opacity: 0; } to { opacity: 1; } }
+.lift-hud.pr { animation: lh-pr 1.4s ease-out; }
+@keyframes lh-pr {
+  0% { background: #2a1008; } 40% { background: #140806; } 100% { background: #04060a; }
+}
+.lh-close {
+  position: absolute; top: 18px; right: 18px; width: 44px; height: 44px;
+  background: none; border: 1px solid rgba(143, 227, 242, .2); color: #5d7480;
+  font-size: 16px; cursor: pointer; border-radius: 6px;
+}
+.lh-close:hover { color: #8fe3f2; border-color: rgba(143, 227, 242, .55); }
+.lh-body { text-align: center; }
+.lh-name {
+  font-size: clamp(11px, 1.6vw, 14px); letter-spacing: .44em;
+  color: #8fe3f2; text-transform: uppercase;
+}
+.lh-target {
+  font-size: clamp(84px, 17vw, 168px); font-weight: 150; line-height: .9;
+  letter-spacing: -.03em; margin-top: 14px; font-variant-numeric: tabular-nums;
+}
+.lift-hud.pr .lh-target { color: #ff6a3d; text-shadow: 0 0 70px rgba(255, 106, 61, .55); }
+.lh-unit {
+  font-size: clamp(10px, 1.2vw, 12px); letter-spacing: .34em; color: #5d7480;
+  margin-top: 12px;
+}
+.lh-plates {
+  font-size: clamp(11px, 1.4vw, 14px); letter-spacing: .22em; color: #f2a63c;
+  margin-top: 24px; min-height: 1.2em;
+}
+.lh-e1 {
+  font-size: clamp(9px, 1.1vw, 11px); letter-spacing: .24em; color: #5d7480;
+  margin-top: 12px; min-height: 1.2em;
+}
+.lh-sets { display: flex; gap: 14px; justify-content: center; margin-top: 30px; }
+.lh-dot { width: 44px; height: 4px; background: rgba(143, 227, 242, .16); }
+.lh-dot.done { background: #8fe3f2; box-shadow: 0 0 14px rgba(143, 227, 242, .8); }
+.lh-dot.pr { background: #ff6a3d; box-shadow: 0 0 18px rgba(255, 106, 61, .9); }
+.lh-rest {
+  font-size: clamp(13px, 2vw, 18px); letter-spacing: .3em; color: #f2a63c;
+  margin-top: 30px; font-variant-numeric: tabular-nums;
+}
+.lh-rest.ready { color: #6ee7a8; }
+.lh-controls {
+  position: absolute; bottom: 46px; display: flex; gap: 8px; flex-wrap: wrap;
+  justify-content: center; padding: 0 12px;
+}
+.lh-btn {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .16em;
+  text-transform: uppercase; padding: 15px 20px; min-height: 50px;
+  background: rgba(143, 227, 242, .05); color: #8fe3f2;
+  border: 1px solid rgba(143, 227, 242, .18); border-radius: 6px; cursor: pointer;
+}
+.lh-btn:hover { background: rgba(143, 227, 242, .14); border-color: rgba(143, 227, 242, .5); }
+.lh-primary {
+  background: rgba(242, 193, 78, .14); color: #ffd875;
+  border-color: rgba(242, 193, 78, .5); font-weight: 600; padding: 15px 34px;
+}
+.lh-primary:hover { background: rgba(242, 193, 78, .26); }
+.lh-hint {
+  position: absolute; bottom: 16px; font-size: 9px; letter-spacing: .18em;
+  color: #3d4c55; text-transform: uppercase;
+}
+@media (max-width: 720px) {
+  .lh-hint { display: none; }
+  .lh-controls { bottom: 24px; gap: 6px; }
+  .lh-btn { padding: 14px 14px; font-size: 10px; }
+  .lh-sets { gap: 8px; } .lh-dot { width: 30px; }
+}
+
 /* ── VESSEL ─────────────────────────────────────────────────────────── */
 .vessel-wrap {
   position: relative; margin: 4px 0 14px; border-radius: var(--radius);
