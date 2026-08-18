@@ -8,9 +8,11 @@ import { renderSupplements } from './sections/supplements.js';
 import { renderDeals } from './sections/deals.js';
 import { renderCoach } from './sections/coach.js';
 import { renderRemedies } from './sections/remedies.js';
+import { renderVessel } from './sections/vessel.js';
 
 const SECTIONS = {
   dashboard: renderDashboard,
+  vessel: renderVessel,
   weight: renderWeight,
   vitals: renderVitals,
   meals: renderMeals,

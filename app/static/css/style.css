@@ -479,6 +479,64 @@ dialog form { display: grid; gap: 12px; }
   .onboarding .ob-step { grid-template-columns: 20px 1fr; }
 }
 
+/* ── VESSEL ─────────────────────────────────────────────────────────── */
+.vessel-wrap {
+  position: relative; margin: 4px 0 14px; border-radius: var(--radius);
+  overflow: hidden; background: #04060a; border: 1px solid rgba(143, 227, 242, .12);
+}
+.vessel-canvas { display: block; width: 100%; }
+.vessel-hud {
+  position: absolute; inset: 0; pointer-events: none;
+  font-family: var(--font-mono); color: #e9f6fa;
+}
+.vessel-hud .vh { position: absolute; }
+.vessel-hud .vh-lab {
+  display: block; font-size: 9px; letter-spacing: .22em;
+  text-transform: uppercase; color: #5d7480;
+}
+.vessel-hud .vh-big {
+  display: block; font-size: clamp(28px, 5vw, 46px); font-weight: 200;
+  line-height: .95; margin-top: 8px; font-variant-numeric: tabular-nums;
+}
+.vessel-hud .vh-mid {
+  display: block; font-size: clamp(20px, 3.4vw, 30px); font-weight: 200;
+  line-height: .95; margin-top: 8px; color: #8fe3f2;
+  font-variant-numeric: tabular-nums;
+}
+.vessel-hud small {
+  display: block; margin-top: 7px; font-size: 10px; letter-spacing: .12em;
+  color: #5d7480;
+}
+.vessel-hud .vh-big.over { color: #f2a63c; }
+.vessel-hud .vh-big.warn { color: #f2a63c; }
+.vessel-hud .vh-mid.faded { color: #5d7480; text-decoration: underline dotted; }
+.vessel-hud .vh-tl { left: 20px; top: 20%; }
+.vessel-hud .vh-bl { left: 20px; bottom: 22%; }
+.vessel-hud .vh-tr { right: 20px; top: 20%; text-align: right; }
+.vessel-hud .vh-br { right: 20px; bottom: 22%; text-align: right; }
+.vessel-hud .vh-b {
+  left: 50%; transform: translateX(-50%); bottom: 16px;
+  text-align: center; width: 100%;
+}
+.vessel-hud .vh-voy {
+  display: block; font-size: clamp(12px, 1.7vw, 15px); font-weight: 400;
+  letter-spacing: .12em; margin-top: 6px; font-variant-numeric: tabular-nums;
+}
+.vessel-hud .vh-voy i { font-style: normal; color: #5d7480; }
+.vessel-hud .vh-voy b { color: #8fe3f2; font-weight: 400; }
+.vessel-state {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  font-size: 9px; letter-spacing: .28em; color: #f2a63c;
+  opacity: 0; transition: opacity .4s; white-space: nowrap;
+}
+.vessel-state.show { opacity: .85; }
+@media (max-width: 720px) {
+  .vessel-hud .vh-lab { font-size: 8px; letter-spacing: .16em; }
+  .vessel-hud small { font-size: 9px; }
+  .vessel-hud .vh-tl, .vessel-hud .vh-tr { top: 12%; }
+  .vessel-hud .vh-bl, .vessel-hud .vh-br { bottom: 26%; }
+}
+
 /* ── guided tape form ───────────────────────────────────────────────── */
 .tape-date { display: block; max-width: 170px; margin-bottom: 12px; }
 .tape-grid {

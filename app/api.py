@@ -236,6 +236,17 @@ def add_meal():
     return jsonify({'ok': True})
 
 
+@bp.get('/vessel')
+def vessel():
+    """Fully-derived payload for the VESSEL instrument.
+
+    The canvas is a pure function of this JSON and computes nothing — so the
+    renderer can be verified against fixtures with no backend, and the backend
+    with no canvas, and neither can lie about the other.
+    """
+    return jsonify(stats.vessel(store.load()))
+
+
 @bp.get('/system')
 def system_pulse():
     """Health of the machinery guarding the user's data: backups, AI backend,
