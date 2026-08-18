@@ -26,6 +26,12 @@
     <div class="top-right">
       <span id="ai-badge" class="badge" hidden></span>
       <button id="mic-btn" class="mic-btn" type="button" title="Voice log: say what you ate, a weigh-in, or a supplement" aria-label="Voice log" hidden>⏺</button>
+      <form id="quick-form" class="quick-bar" autocomplete="off">
+        <input id="quick-input" name="text" type="text" inputmode="text"
+               placeholder="Log anything — 215 · waist 37.2 · bench 225x5x3"
+               aria-label="Quick log">
+        <button class="quick-go" type="submit" aria-label="Log it">↵</button>
+      </form>
       <button id="profile-btn" class="ghost-btn" type="button">Profile</button>
     </div>
   </header>
@@ -59,6 +65,7 @@
       · <button id="import-btn" type="button" style="background:none;border:0;padding:0;color:var(--steel);cursor:pointer;font:inherit">import CSV</button>
     </span>
     <button id="pulse-btn" type="button" style="background:none;border:0;padding:0 0 0 14px;border-left:1px solid var(--line);color:var(--steel);cursor:pointer;font:inherit">system pulse</button>
+    <a href="#demo" style="padding-left:14px;border-left:1px solid var(--line);color:var(--steel)">demo mode</a>
     <span style="margin-left:auto">Golden Nutrition AI — the iron doesn't lie</span>
   </footer>
 

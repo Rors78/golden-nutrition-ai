@@ -2254,3 +2254,113 @@ def test_change_skips_sites_not_measured_in_both(client):
     """You cannot difference a site that only exists on one side."""
     ch = _two_tapes(client, {"waist_in": 39.0}, {"waist_in": 38.0, "arm_in": 15.1})
     assert [s["site"] for s in ch["sites"]] == ["waist_in"]
+
+
+# ── quick log: one box, no AI needed for the common shapes ─────────────────
+
+@pytest.mark.parametrize("text,kind,check", [
+    ("215", "weight", lambda s: s["weights"][0]["weight"] == 215),
+    ("214.6", "weight", lambda s: s["weights"][0]["weight"] == 214.6),
+    ("weigh in at 200 lbs", "weight", lambda s: s["weights"][0]["weight"] == 200),
+    ("waist 37.2", "measurement", lambda s: s["measurements"][0]["waist_in"] == 37.2),
+    ("hips 41", "measurement", lambda s: s["measurements"][0]["hips_in"] == 41),
+    ("bench press 225x5x3", "workout",
+     lambda s: s["workouts"][0]["exercises"][0] == {
+         "exercise": "Bench Press", "sets": 3, "reps": 5, "weight": 225.0}),
+])
+def test_quick_log_handles_common_shapes_without_ai(client, monkeypatch, text, kind, check):
+    """These must work offline, with no API key and no per-call cost.
+
+    An app that needs a model to record a number the user just typed is slower
+    and more fragile than one that does not.
+    """
+    def no_ai(*a, **k):
+        raise AssertionError(f"quick log called AI for {text!r}")
+    monkeypatch.setattr(ai, "route_voice", no_ai)
+    monkeypatch.setattr(ai, "parse_meals", no_ai)
+
+    r = client.post("/api/quick", json={"text": text})
+    assert r.status_code == 200, r.get_json()
+    body = r.get_json()
+    assert body["action"] == kind and body["ai"] is False
+    assert check(client.get("/api/state").get_json())
+
+
+def test_quick_log_refuses_rather_than_guessing(client, monkeypatch):
+    """Ambiguous input with no AI backend must say so, not invent an entry."""
+    monkeypatch.setattr(ai, "backend_name", lambda: None)
+    r = client.post("/api/quick", json={"text": "two eggs and toast"})
+    assert r.status_code == 400
+    assert "Couldn't read that" in r.get_json()["error"]
+    assert client.get("/api/state").get_json()["meals"] == []
+
+
+def test_quick_log_does_not_mistake_calories_for_bodyweight(client, monkeypatch):
+    """1200 is a calorie count, not a weigh-in. Out-of-range numbers fall
+    through to the AI path rather than silently becoming a weight."""
+    monkeypatch.setattr(ai, "backend_name", lambda: None)
+    assert client.post("/api/quick", json={"text": "1200"}).status_code == 400
+    assert client.get("/api/state").get_json()["weights"] == []
+
+
+def test_quick_log_measurement_merges_into_the_day(client, monkeypatch):
+    monkeypatch.setattr(ai, "route_voice",
+                        lambda t: (_ for _ in ()).throw(AssertionError("no AI")))
+    client.post("/api/quick", json={"text": "waist 37.2"})
+    client.post("/api/quick", json={"text": "neck 15.4"})
+    rows = client.get("/api/state").get_json()["measurements"]
+    assert len(rows) == 1
+    assert rows[0]["waist_in"] == 37.2 and rows[0]["neck_in"] == 15.4
+
+
+# ── demo mode's preview endpoint ───────────────────────────────────────────
+
+def test_vessel_preview_derives_without_saving(client):
+    """Demo mode shows a full figure on an install that has logged nothing.
+
+    It posts a dataset and gets the same derived payload the real endpoint
+    returns — rather than reimplementing Navy BF and the change map in JS,
+    which would be the second source of truth the architecture avoids.
+    """
+    demo = {
+        "profile": {"sex": "male", "height_in": 71, "weight": 210,
+                    "goal_weight": 190},
+        "measurements": [
+            {"date": (date.today() - timedelta(days=84)).isoformat(),
+             "waist_in": 39.8, "neck_in": 15.8, "chest_in": 42.4, "hips_in": 42.0},
+            {"date": date.today().isoformat(),
+             "waist_in": 37.0, "neck_in": 15.4, "chest_in": 43.6, "hips_in": 40.9},
+        ],
+        "weights": [{"date": date.today().isoformat(), "weight": 210}],
+        "meals": [{"date": date.today().isoformat(), "time": "12:00",
+                   "name": "Chicken", "protein": 52, "calories": 640,
+                   "carbs": 60, "fat": 18, "fiber": 6}],
+        "workouts": [{"date": date.today().isoformat(), "time": "17:30",
+                      "name": "Push Day", "duration": 60, "intensity": "Hard",
+                      "notes": "", "exercises": [
+                          {"exercise": "Bench Press", "sets": 3, "reps": 5,
+                           "weight": 225}]}],
+    }
+    res = client.post("/api/vessel/preview", json=demo).get_json()
+    v = res["vessel"]
+    assert v["body"]["fidelity"] == "full"
+    assert v["composition"]["have"] is True and v["composition"]["bf_pct"] > 0
+    assert v["change"]["has_data"] is True
+    assert v["change"]["biggest"]["site"] == "waist_in"
+    # The whole derived block comes back, so the demo never re-creates any of
+    # this maths in JS — a "Start here 0/5" card over twelve weeks of data is
+    # exactly what a client-side mock would produce.
+    assert res["stats"]["dashboard"]["onboarding"]["active"] is False
+    assert res["stats"]["weight"]["current"] == 210
+
+    # The real install is untouched — nothing was written.
+    real = client.get("/api/state").get_json()
+    assert real["measurements"] == [] and real["weights"] == []
+    assert client.get("/api/vessel").get_json()["body"]["fidelity"] == "generic"
+
+
+def test_vessel_preview_tolerates_junk(client):
+    """It is fed by the client, so it must not trust the shape."""
+    assert client.post("/api/vessel/preview", json={}).status_code == 200
+    assert client.post("/api/vessel/preview",
+                       json={"measurements": "nope", "profile": 5}).status_code == 200
