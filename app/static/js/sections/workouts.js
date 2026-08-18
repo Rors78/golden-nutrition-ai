@@ -2,6 +2,7 @@
 // load, coach-plan loading, structured logging with last-time hints + PR
 // detection, rest timer, progression charts, history.
 import { el, esc, api, toast, refresh, metric, rowActions, CHART } from '../app.js';
+import { openLiftHud } from './lift-hud.js';
 
 const TYPES = ['Push Day A (Cutler Mode)', 'Pull Day A (Cutler Mode)', 'Leg Day A (Cutler Mode)',
   'Push Day B', 'Pull Day B', 'Leg Day B', 'Cardio', 'Custom'];
@@ -21,15 +22,15 @@ const CUTLER_TEMPLATES = {
 };
 
 // Live session survives refreshes/phone sleep via localStorage.
-const LIVE_KEY = 'gna-live-session';
-const loadLive = () => { try { return JSON.parse(localStorage.getItem(LIVE_KEY)); } catch { return null; } };
-const saveLive = s => localStorage.setItem(LIVE_KEY, JSON.stringify(s));
+export const LIVE_KEY = 'gna-live-session';
+export const loadLive = () => { try { return JSON.parse(localStorage.getItem(LIVE_KEY)); } catch { return null; } };
+export const saveLive = s => localStorage.setItem(LIVE_KEY, JSON.stringify(s));
 const clearLive = () => localStorage.removeItem(LIVE_KEY);
 
 // Plate math: what to slide on each side of a 45 lb bar. Rounds to the
 // nearest 2.5-achievable load; caller compares achieved vs asked.
 const PLATE_SIZES = [45, 35, 25, 10, 5, 2.5];
-function platesPerSide(total, bar = 45) {
+export function platesPerSide(total, bar = 45) {
   if (total < bar) return null;
   let left = Math.round((total - bar) / 2 / 2.5) * 2.5;
   const out = [];
@@ -41,9 +42,9 @@ function platesPerSide(total, bar = 45) {
 
 // Plate math only makes sense for barbell moves — hide it for everything else.
 const NOT_BARBELL = /dumbbell|\bdb\b|cable|machine|band|lateral|fly|flye|pulldown|pushdown|face pull|raise|bodyweight|smith|leg (press|curl|extension)/i;
-const barbellish = name => !NOT_BARBELL.test(name);
+export const barbellish = name => !NOT_BARBELL.test(name);
 
-const e1rm = (w, r) => (w > 0 && r > 0 ? Math.round(w * (1 + r / 30)) : 0);
+export const e1rm = (w, r) => (w > 0 && r > 0 ? Math.round(w * (1 + r / 30)) : 0);
 
 const fmtClock = sec => sec >= 3600
   ? `${Math.floor(sec / 3600)}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`
@@ -133,6 +134,7 @@ export function renderWorkouts(root, state) {
         <label style="flex:0 1 110px">Rest <select class="lv-rest-sel">
           ${[60, 90, 120, 180].map(x => `<option value="${x}"${x === s.rest ? ' selected' : ''}>${fmtClock(x)}</option>`).join('')}
         </select></label>
+        <button type="button" class="ghost-btn lv-hud" style="flex:0 1 auto;min-height:38px;padding:8px 14px" title="Full-screen lift view">◱ Lift view</button>
         <button type="button" class="gold-btn lv-finish" style="flex:0 1 auto;min-height:38px;padding:8px 16px">Finish &amp; save</button>
         <button type="button" class="ghost-btn lv-discard" style="flex:0 1 auto;min-height:38px;padding:8px 12px">Discard</button>
       </div>
@@ -239,6 +241,11 @@ export function renderWorkouts(root, state) {
     });
 
     panel.querySelector('.lv-finish').addEventListener('click', () => finishSession(s));
+    // The HUD edits the same localStorage session, so on exit we re-read it
+    // rather than trusting this closure's copy — sets logged there are real.
+    panel.querySelector('.lv-hud').addEventListener('click', () => {
+      openLiftHud(() => drawLive());
+    });
 
     liveWrap.append(panel);
     const elapsedEl = panel.querySelector('.lv-elapsed');
