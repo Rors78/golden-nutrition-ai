@@ -479,6 +479,28 @@ dialog form { display: grid; gap: 12px; }
   .onboarding .ob-step { grid-template-columns: 20px 1fr; }
 }
 
+/* ── live alert bar ─────────────────────────────────────────────────── */
+/* What the sentinel would push, for a screen that is already open. */
+.alert-bar {
+  margin: 0 0 6px; padding: 0 4px;
+  animation: ab-in .3s ease-out;
+}
+@keyframes ab-in { from { opacity: 0; transform: translateY(-4px); } }
+.alert-bar .ab-in {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; border-radius: var(--radius-sm);
+  background: rgba(240, 146, 95, .07); border: 1px solid rgba(240, 146, 95, .28);
+}
+.alert-bar .ab-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--warn);
+  flex: none; animation: ab-pulse 2.2s ease-in-out infinite;
+}
+@keyframes ab-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.alert-bar .ab-text {
+  font-size: 13px; color: var(--ink-2); line-height: 1.4;
+}
+body.demo-on .alert-bar { display: none; }
+
 /* ── demo mode ──────────────────────────────────────────────────────── */
 /* A screen nobody is standing at has to explain itself, so each stop is
    captioned and the progress bar shows the loop is alive. */

@@ -2364,3 +2364,46 @@ def test_vessel_preview_tolerates_junk(client):
     assert client.post("/api/vessel/preview", json={}).status_code == 200
     assert client.post("/api/vessel/preview",
                        json={"measurements": "nope", "profile": 5}).status_code == 200
+
+
+# ── live sync: an open tab stays current on its own ────────────────────────
+
+def test_pulse_rev_moves_only_when_data_changes(client):
+    """The client re-fetches state on rev change, so a rev that moves without
+    a write would defeat the point of polling something small."""
+    first = client.get("/api/pulse").get_json()["rev"]
+    assert client.get("/api/pulse").get_json()["rev"] == first, "reads must not move rev"
+
+    client.post("/api/quick", json={"text": "215"})
+    assert client.get("/api/pulse").get_json()["rev"] != first
+
+
+def test_pulse_reports_today_without_the_full_state_payload(client):
+    """It is polled every few seconds. It must stay small — no stats block,
+    no coach roster, no knowledge base."""
+    client.post("/api/profile", json={"daily_protein_g": 190, "daily_calories": 2400})
+    client.post("/api/meals", json={"name": "Eggs", "protein": 30, "calories": 400})
+    p = client.get("/api/pulse").get_json()
+    assert p["today"] == {"protein": 30, "protein_goal": 190, "calories": 400,
+                          "calorie_goal": 2400, "meals": 1, "workouts": 0,
+                          "weighed": False}
+    for heavy in ("stats", "coaches", "kb", "meals", "remedies_stats"):
+        assert heavy not in p, f"{heavy} makes the poll expensive"
+
+
+def test_pulse_surfaces_the_same_alerts_the_sentinel_pushes(client):
+    """On this machine there is no ntfy topic, so sentinel alerts reach
+    nobody. A screen that is already open is the obvious second place — and
+    it must be the same function, or the two will disagree."""
+    from app import data as store, stats as s
+    p = client.get("/api/pulse").get_json()
+    assert p["alerts"] == s.sentinel_alerts(store.load())
+    assert any("Nothing logged yet" in a for a in p["alerts"])
+
+
+def test_pulse_carries_the_server_date_for_rollover(client):
+    """A tab open past midnight has stale today-scoped panels even though no
+    data changed. The client compares this to detect the rollover."""
+    p = client.get("/api/pulse").get_json()
+    assert p["server_date"] == date.today().isoformat()
+    assert ":" in p["server_time"]
