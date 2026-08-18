@@ -8,7 +8,21 @@
 // by meridian strands whose alpha tracks sin(theta + rotation) so front-facing
 // strands burn brighter than back. That single trick reads as a rotating 3D
 // scan with no mesh, no library, and no depth buffer.
-import { el, esc, api } from '../app.js';
+import { el, esc, api, toast, refresh } from '../app.js';
+
+// Which torso slice belongs to which measurable site, so a tap on a ring knows
+// what it is asking for. Only real sites appear here — the interpolated
+// shoulder/rib rings are not tappable, because there is nothing to log.
+const RING_SITES = [
+  { y: 9.2, key: 'neck_in', label: 'Neck',
+    how: 'Just below the larynx, tape sloping slightly down at the front.' },
+  { y: 16.6, key: 'chest_in', label: 'Chest',
+    how: 'Across the nipples, arms relaxed, at the end of a normal breath out.' },
+  { y: 24.2, key: 'waist_in', label: 'Waist',
+    how: 'At the navel, not the narrowest point. Relaxed — do not suck in.' },
+  { y: 28.0, key: 'hips_in', label: 'Hips',
+    how: 'The widest point of the glutes, feet together.' },
+];
 
 const TAU = Math.PI * 2;
 const TILT = 0.27;          // ellipse squash: how much "perspective" a ring has
@@ -57,6 +71,7 @@ export function renderVessel(root, state) {
       <div class="vh vh-b"><span class="vh-lab" data-f="voyLab">Voyage</span>
         <b class="vh-voy" data-f="voy">—</b><small data-f="eta">—</small></div>
       <div class="vessel-state" data-f="stateTag"></div>
+      <div class="vessel-hint" data-f="hint"></div>
     </div>
   </div>`);
   root.append(wrap);
@@ -67,6 +82,7 @@ export function renderVessel(root, state) {
 
   let W = 0, H = 0, raf = 0, t0 = performance.now();
   let V = null;                       // the payload; null until first fetch
+  let hot = null;                     // ring under the pointer, if any
   const D = { kcal: 0, prot: 0, acr: 0, bf: 0 };   // eased display values
 
   function resize() {
@@ -119,6 +135,31 @@ export function renderVessel(root, state) {
     }
   }
 
+  // Single source of truth for the figure transform. Both the renderer and the
+  // hit-test read it, so a tap can never land somewhere the ring is not drawn.
+  function geom() {
+    const ppi = Math.min(H * 0.92 / BODY_IN, W * 0.34 / 12);
+    return { ppi, cxp: W / 2, top: H / 2 - BODY_IN * ppi * 0.5 };
+  }
+
+  // Which tappable ring is under this point, if any.
+  function ringAt(px, py) {
+    if (!V || !V.body.have) return null;
+    const { ppi, cxp, top } = geom();
+    const tape = V.body.tape_in || {};
+    let best = null, bestD = 26;   // generous target: fingers, not cursors
+    for (const site of RING_SITES) {
+      const ry = top + site.y * ppi;
+      const c = tape[site.key];
+      const rp = c ? (c / Math.PI / 2) * ppi : 3 * ppi;
+      // distance to the ellipse band, not its centre
+      const dx = Math.abs(px - cxp), dy = Math.abs(py - ry);
+      const d = Math.hypot(Math.max(0, dx - rp), dy / TILT * 0.55);
+      if (d < bestD) { bestD = d; best = site; }
+    }
+    return best;
+  }
+
   function figure(t) {
     const b = V.body;
     const sl = slices(b.tape_in || {}, reduced ? 1 : 1 + 0.014 * Math.sin(t * 1.55));
@@ -128,20 +169,29 @@ export function renderVessel(root, state) {
     const alpha = b.fidelity === 'full' ? 1 : b.fidelity === 'estimated' ? 0.65 : 0.45;
     // Scale to fill the frame vertically; the figure is the primary object,
     // not a diagram sitting in the middle of one.
-    const ppi = Math.min(H * 0.92 / BODY_IN, W * 0.34 / 12);
-    const cxp = W / 2;
+    const { ppi, cxp, top } = geom();
     const rot = reduced ? 0.7 : t * 0.30;
     const shellK = V.composition.have
       ? Math.min(1, Math.max(0, (V.composition.bf_pct - 8) / 27)) * 0.20 : 0;
 
     cx.save();
-    cx.translate(0, H / 2 - BODY_IN * ppi * 0.5);
+    cx.translate(0, top);
     cx.globalCompositeOperation = 'lighter';
     for (const side of [-1, 1]) {
       stack(sl.leg, side * sl.hipR * ppi * 0.46, cxp, ppi, rot, alpha * 0.72, shellK * 0.8);
       stack(sl.arm, side * sl.shoulderR * ppi * 0.98, cxp, ppi, rot, alpha * 0.62, shellK * 0.7);
     }
     stack(sl.torso, 0, cxp, ppi, rot, alpha, shellK);
+
+    // the ring under the pointer lights up, so the target is legible before
+    // the tap rather than discovered by it
+    if (hot) {
+      const c = (b.tape_in || {})[hot.key];
+      const rp = c ? (c / Math.PI / 2) * ppi : 3 * ppi;
+      cx.beginPath();
+      cx.ellipse(cxp, hot.y * ppi, rp, rp * TILT, 0, 0, TAU);
+      cx.strokeStyle = 'rgba(242,166,60,.9)'; cx.lineWidth = 2; cx.stroke();
+    }
     cx.beginPath();
     cx.moveTo(cxp, 9.2 * ppi); cx.lineTo(cxp, 31 * ppi);
     cx.strokeStyle = `rgba(242,166,60,${(0.16 + 0.1 * Math.sin(t * 1.55)) * alpha})`;
@@ -254,6 +304,53 @@ export function renderVessel(root, state) {
   const ro = new ResizeObserver(resize);
   ro.observe(wrap);
   resize();
+
+  // ── the instrument as input surface ───────────────────────────────────
+  // Logging *through* the figure is what kills the chore: tap the waist ring
+  // and enter a waist. The forms in Weight stay — a hit target is a fine
+  // affordance and a poor accessibility story, so this is *a* way to log,
+  // never the only one.
+  function pointAt(ev) {
+    const r = cv.getBoundingClientRect();
+    return [ev.clientX - r.left, ev.clientY - r.top];
+  }
+
+  cv.addEventListener('pointermove', ev => {
+    const next = ringAt(...pointAt(ev));
+    if (next !== hot) {
+      hot = next;
+      cv.style.cursor = hot ? 'pointer' : 'default';
+      F.hint.textContent = hot ? `${hot.label} — tap to log` : '';
+      F.hint.classList.toggle('show', !!hot);
+    }
+  });
+  cv.addEventListener('pointerleave', () => {
+    hot = null; cv.style.cursor = 'default'; F.hint.classList.remove('show');
+  });
+
+  cv.addEventListener('click', async ev => {
+    const site = ringAt(...pointAt(ev));
+    if (!site) return;
+    const current = (V.body.tape_in || {})[site.key];
+    const shown = V.body.fidelity === 'full' && current ? ` (last: ${current}")` : '';
+    const raw = prompt(`${site.label} in inches${shown}\n\n${site.how}`,
+                       V.body.fidelity === 'full' && current ? current : '');
+    if (raw === null) return;
+    const val = parseFloat(raw);
+    if (!(val > 0)) { toast('Enter a number in inches.'); return; }
+    // Same >2in placement guard as the Weight form: a jump that large is
+    // almost always the tape sitting somewhere different.
+    if (V.body.fidelity === 'full' && current && Math.abs(val - current) > 2
+        && !confirm(`${site.label}: ${current}" → ${val.toFixed(1)}"\n\n`
+          + 'That is a big change. Usually it means the tape sat somewhere '
+          + 'different. Log it anyway?')) return;
+    try {
+      await api('POST', '/measurements', { [site.key]: val });
+      toast(`${site.label} logged`);
+      V = await api('GET', '/vessel');
+      await refresh();
+    } catch (e) { toast(e.message); }
+  });
 
   api('GET', '/vessel').then(v => { V = v; }).catch(() => {});
   raf = requestAnimationFrame(frame);
