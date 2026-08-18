@@ -17,7 +17,9 @@ from app import create_app  # noqa: E402
 def main():
     app = create_app()
     with app.test_client() as client:
-        res = client.post('/api/watches/recheck')
+        # Unattended: run the AI subprocess with a minimal environment.
+        res = client.post('/api/watches/recheck',
+                          headers={'X-GNA-Unattended': '1'})
         body = res.get_json() or {}
         if res.status_code == 200:
             print(f"Re-checked {body.get('updated', 0)} watches; "
