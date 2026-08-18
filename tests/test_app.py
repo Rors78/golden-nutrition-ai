@@ -1260,11 +1260,13 @@ def test_weekly_review_archived(client, monkeypatch):
 
 def test_dashboard_command_center(client, monkeypatch):
     dash = client.get("/api/state").get_json()["stats"]["dashboard"]
-    # empty data: 7-day grid exists, streaks zeroed, briefing action offered
+    # empty data: 7-day grid exists, streaks zeroed. The briefing is NOT
+    # offered — with nothing logged it cannot be generated, and this
+    # assertion used to encode that bug (see the cold-install tests below).
     assert len(dash["week_grid"]) == 7
     assert sum(1 for d in dash["week_grid"] if d["is_today"]) == 1
     assert dash["streaks"] == {"meals": 0, "weights": 0, "vitals": 0, "workout_weeks": 0}
-    assert any(a["id"] == "briefing" for a in dash["actions"])
+    assert not any(a["id"] == "briefing" for a in dash["actions"])
     assert len(dash["actions"]) <= 2
 
     # log things today → grid reflects them, streaks tick
@@ -1857,3 +1859,65 @@ def test_validate_rejects_structurally_wrong_payloads():
     assert store.validate({"profile": {}, "settings": {}})          # lists missing
     assert store.validate({"profile": [], "settings": {}, "meals": [],
                            "workouts": [], "weights": [], "supplements": []})
+
+
+# ── first run: an empty install must be a path, not a wall of zeros ─────────
+
+def test_cold_install_does_not_offer_the_briefing(client):
+    """The app's own first suggestion was the one action guaranteed to 422.
+
+    With nothing logged the briefing cannot be generated, so offering it is a
+    dead end at the top of the screen — and it is what let a contentless
+    briefing get requested at all (SCARS #10).
+    """
+    dash = client.get("/api/state").get_json()["stats"]["dashboard"]
+    assert not any(a["id"] == "briefing" for a in dash["actions"])
+    assert dash["onboarding"]["cold"] is True
+    assert dash["onboarding"]["active"] is True
+
+
+def test_cold_install_always_offers_something_to_do(client, monkeypatch):
+    """Even after noon. The weigh-in prompt used to be gated on hour < 12, so
+    a new user opening the app in the afternoon saw no next step at all."""
+    import app.stats as stats
+
+    class Afternoon(stats.datetime):
+        @classmethod
+        def now(cls):
+            return cls(2026, 8, 18, 16, 0, 0)
+    monkeypatch.setattr(stats, "datetime", Afternoon)
+
+    dash = client.get("/api/state").get_json()["stats"]["dashboard"]
+    assert dash["actions"], "a cold install after noon offered nothing to do"
+    assert any(a["id"] == "weigh" for a in dash["actions"])
+
+
+def test_onboarding_tracks_real_progress_and_retires_itself(client):
+    """Steps flip as real data lands, and the panel disappears when done."""
+    def ob():
+        return client.get("/api/state").get_json()["stats"]["dashboard"]["onboarding"]
+
+    assert ob()["complete"] == 0
+
+    client.post("/api/profile", json={"weight": 214, "goal_weight": 190})
+    assert next(s for s in ob()["steps"] if s["id"] == "profile")["done"] is True
+
+    client.post("/api/weights", json={"weight": 214})
+    client.post("/api/meals", json={"name": "Eggs", "protein": 30, "calories": 400})
+    client.post("/api/workouts", json={"name": "Push day"})
+    after = ob()
+    assert after["complete"] == 4
+    assert after["cold"] is False, "something is logged now"
+    assert after["active"] is True, "one step still outstanding"
+
+    client.post("/api/measurements", json={"waist_in": 37.0})
+    done = ob()
+    assert done["complete"] == done["total"]
+    assert done["active"] is False, "the panel must retire itself"
+
+
+def test_briefing_returns_once_there_is_something_to_brief_on(client):
+    """The gate is on data, not a permanent removal."""
+    client.post("/api/meals", json={"name": "Eggs", "protein": 30, "calories": 400})
+    dash = client.get("/api/state").get_json()["stats"]["dashboard"]
+    assert any(a["id"] == "briefing" for a in dash["actions"])

@@ -19,10 +19,43 @@ export function renderDashboard(root, state) {
     root.append(el(`<p class="section-sub">Set your weight and goal in Profile to unlock pace tracking.</p>`));
   }
 
+  // ── first run: turn an empty install into a path ──────────────────────
+  // A wall of zero-rings is honest and useless. Same emptiness, told as what
+  // the next entry unlocks. Disappears on its own once every step is done.
+  const ob = state.stats.dashboard?.onboarding;
+  if (ob?.active) {
+    const rows = ob.steps.map(s => `
+      <li class="ob-step${s.done ? ' done' : ''}">
+        <span class="ob-mark">${s.done ? '✓' : ''}</span>
+        <span class="ob-body">
+          <b>${esc(s.title)}</b>
+          <small>${esc(s.unlocks)}</small>
+        </span>
+      </li>`).join('');
+    const panel = el(`<div class="card onboarding">
+      <div class="ob-head">
+        <p class="chart-title" style="color:var(--gold-bright);margin:0">
+          ${ob.cold ? 'Start here' : 'Getting set up'}
+        </p>
+        <span class="ob-count">${ob.complete} / ${ob.total}</span>
+      </div>
+      <p class="ob-lede">${esc(ob.cold
+        ? 'Nothing logged yet — every number below is waiting on you. The app '
+          + 'stays quiet rather than guessing, so one entry changes what it can say.'
+        : 'Each step switches on a part of the app that is currently silent.')}</p>
+      <div class="ob-track"><div class="ob-fill" style="width:${(ob.complete / ob.total * 100).toFixed(0)}%"></div></div>
+      <ul class="ob-list">${rows}</ul>
+    </div>`);
+    root.append(panel);
+  }
+
   // Morning briefing from the coach
   const briefCoach = (state.coaches || []).find(c => c.id === (state.briefing?.coach || state.coach));
   const todayIso = new Date().toISOString().slice(0, 10);
-  if (state.briefing?.date === todayIso) {
+  if (ob?.cold) {
+    // Deliberately no briefing button: with nothing logged the request is a
+    // guaranteed 422, and offering it was the app's own first suggestion.
+  } else if (state.briefing?.date === todayIso) {
     root.append(el(`<div class="card" style="margin-top:4px;border-left:4px solid var(--gold)">
       <p class="chart-title">Morning briefing · ${esc(briefCoach?.name || 'Coach')}</p>
       <div class="prose" style="font-size:14px">${markdown(state.briefing.text)}</div>

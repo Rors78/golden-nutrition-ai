@@ -1138,8 +1138,12 @@ def dashboard_extras(data):
     # ── next best action (rule-based, top 2) ──
     actions = []
     now = datetime.now()
+    has_any = days_since_user_entry(data) is not None
     briefing = data.get('briefing') or {}
-    if briefing.get('date') != today.isoformat():
+    # The briefing needs something to brief on. Offering it first on an empty
+    # install put the one action guaranteed to fail at the top of the screen —
+    # and it is what let a contentless briefing get generated at all (SCARS #10).
+    if has_any and briefing.get('date') != today.isoformat():
         actions.append({'id': 'briefing', 'tab': 'dashboard',
                         'text': "Get today's briefing from your coach."})
     today_status = plan_by_date.get(today.isoformat())
@@ -1164,9 +1168,14 @@ def dashboard_extras(data):
         actions.append({'id': 'protein', 'tab': 'meals',
                         'text': f"{protein_goal - protein_today}g of protein still to go — "
                                 "ask for a meal suggestion."})
-    if today.isoformat() not in weight_dates and now.hour < 12:
+    # The morning-only gate is right once weigh-ins are a habit; before the
+    # first one there is no habit to time, and an empty install after noon
+    # would otherwise show nothing to do.
+    if today.isoformat() not in weight_dates and (now.hour < 12 or not weight_dates):
         actions.append({'id': 'weigh', 'tab': 'weight',
-                        'text': 'Morning weigh-in — daily beats perfect.'})
+                        'text': ('Step on the scale — one number starts the trend.'
+                                 if not weight_dates
+                                 else 'Morning weigh-in — daily beats perfect.')})
     if schedule and now.hour >= 18:
         left = sum(1 for item in schedule
                    if not any(s['date'] == today.isoformat() and s['name'] == item['name']
@@ -1216,7 +1225,55 @@ def dashboard_extras(data):
         radar.append({'tab': 'workouts', 'level': 'warn', 'text': mb['warning']})
 
     return {'week_grid': grid, 'streaks': streaks, 'actions': actions[:2],
-            'radar': radar[:4]}
+            'radar': radar[:4], 'onboarding': onboarding(data)}
+
+
+# What each engine needs before it can say anything true. These are the real
+# thresholds from the functions themselves, not marketing numbers — the point
+# is that a new user can see what their next entry actually unlocks instead of
+# staring at a wall of zeros.
+ONBOARDING_STEPS = (
+    ('profile', 'Set your weight and goal',
+     'Unlocks pace tracking, calorie targets, and the plan line.'),
+    ('weigh', 'Log one weigh-in',
+     'Starts the trend. Three weeks of daily weigh-ins measures your true '
+     'day-to-day noise.'),
+    ('meal', 'Log one meal',
+     'Today\'s rings come alive. Ten fully-logged days unlock adaptive TDEE.'),
+    ('workout', 'Log one workout',
+     'Starts the strain radar and the progression engine.'),
+    ('tape', 'Take one tape measurement',
+     'Unlocks body-fat estimates and the change-over-time view.'),
+)
+
+
+def onboarding(data):
+    """First-run progress: what is done, what is next, what it unlocks.
+
+    An empty install currently renders as zeros in every ring — technically
+    honest and completely uninformative. This turns the same emptiness into a
+    path, and it disappears on its own once every step is done.
+    """
+    profile = data.get('profile') or {}
+    done = {
+        'profile': bool(profile.get('weight')) and bool(profile.get('goal_weight')),
+        'weigh': bool(data.get('weights')),
+        'meal': bool(data.get('meals')),
+        'workout': bool(data.get('workouts')),
+        'tape': bool(data.get('measurements')),
+    }
+    steps = [{'id': i, 'title': t, 'unlocks': u, 'done': done.get(i, False)}
+             for i, t, u in ONBOARDING_STEPS]
+    complete = sum(1 for s in steps if s['done'])
+    return {
+        'active': complete < len(steps),
+        'steps': steps,
+        'complete': complete,
+        'total': len(steps),
+        # Nothing logged at all is a different state from partway through:
+        # it is the only time the app has literally nothing to show.
+        'cold': days_since_user_entry(data) is None,
+    }
 
 
 def checklist(data):
