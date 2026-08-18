@@ -266,7 +266,15 @@ def system_pulse():
                         'scripts\\install_windows_tasks.ps1).')
     if not ai.backend_name():
         warnings.append('No AI backend — install Claude Code or set ANTHROPIC_API_KEY.')
-    if not (d['settings'].get('ntfy_topic') or '').strip():
+    topic_state = store.secret_state(d, 'ntfy_topic')
+    if topic_state == store.SECRET_CLEARED_BY_RESTORE:
+        # Distinct from never-configured: this one WAS working and a restore
+        # dropped it. Saying so is the difference between "set this up" and
+        # "your push channel silently stopped".
+        warnings.append('Notification topic was cleared by a restore — backups '
+                        'do not carry it. Re-enter it in Vitals or the sentinel, '
+                        'briefing, and price-watch jobs stay silent.')
+    elif topic_state == store.SECRET_NEVER_SET:
         warnings.append('No notification topic — the sentinel, briefing, and '
                         'price-watch jobs have nowhere to push. Set one in Vitals.')
     quiet = stats.days_since_user_entry(d)
@@ -500,6 +508,11 @@ def save_settings():
     s = d['settings']
     if 'ntfy_topic' in body:
         s['ntfy_topic'] = str(body['ntfy_topic']).strip()
+        if s['ntfy_topic']:
+            # Re-entered: the cleared-by-restore state is resolved, so the
+            # warning must stop. A flag that never clears is noise.
+            (s.get(store.SECRET_STATE_KEY) or {}).pop('ntfy_topic', None)
+            (s.get(store.SECRET_STATE_KEY) or {}).pop('ntfy_topic_at', None)
     if 'ntfy_server' in body:
         s['ntfy_server'] = str(body['ntfy_server']).strip() or 'https://ntfy.sh'
     if 'daily_steps' in body:
@@ -1349,16 +1362,37 @@ def import_backup():
     # Backups no longer carry credentials (data.for_export strips them), so a
     # restore must not wipe the live ones by writing the backup wholesale.
     # Machine-local secrets survive a restore of the user's records.
+    #
+    # Onto a FRESH machine there is nothing to preserve, and the naive version
+    # of this leaves an empty string — indistinguishable from never-configured,
+    # so the loss is silent. The restore knows exactly which keys it kept and
+    # which it could not; it reports that verbatim rather than leaving a health
+    # check to infer it afterwards.
+    now = datetime.now().isoformat(timespec='seconds')
     body.setdefault('settings', {})
+    preserved, needs_reentry = [], []
     for k in store.EXPORT_STRIP_SETTINGS:
-        if not str(body['settings'].get(k) or '').strip():
-            kept = current.get('settings', {}).get(k)
-            if kept:
-                body['settings'][k] = kept
+        if k == store.SECRET_STATE_KEY:
+            continue
+        if str(body['settings'].get(k) or '').strip():
+            continue
+        kept = str(current.get('settings', {}).get(k) or '').strip()
+        if kept:
+            body['settings'][k] = kept
+            preserved.append(k)
+        else:
+            body['settings'].pop(k, None)
+            store.mark_secret_cleared(body, k, now)
+            needs_reentry.append(k)
     store.save(body)
     restored = store.load()  # re-load runs the usual defaults/migration
+    # ingest_token regenerates itself on the next /api/state, so it is not the
+    # user's problem. Only report what a human actually has to re-enter.
+    manual = [k for k in needs_reentry if k != 'ingest_token']
     return jsonify({'ok': True,
                     'meals': len(restored['meals']),
                     'workouts': len(restored['workouts']),
                     'weights': len(restored['weights']),
-                    'snapshot': str(snap)})
+                    'snapshot': str(snap),
+                    'secrets_preserved': preserved,
+                    'secrets_need_reentry': manual})
