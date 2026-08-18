@@ -479,6 +479,29 @@ dialog form { display: grid; gap: 12px; }
   .onboarding .ob-step { grid-template-columns: 20px 1fr; }
 }
 
+/* ── coach-proposed actions ─────────────────────────────────────────── */
+/* The coach can propose a write; only this card can commit one. It always
+   states exactly what will be saved before it is saved. */
+.coach-action {
+  margin: 8px 0 8px 12px; padding: 12px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--gold-dim); background: rgba(242, 193, 78, .05);
+  max-width: 520px;
+}
+.coach-action .ca-head {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--gold-bright);
+}
+.coach-action .ca-body {
+  margin: 7px 0 11px; font-size: 14px; color: var(--ink); line-height: 1.45;
+}
+.coach-action .ca-btns { display: flex; gap: 8px; align-items: center; }
+.coach-action .ca-btns button { min-height: 36px; padding: 7px 16px; font-size: 13px; }
+.coach-action.done { border-color: rgba(126, 224, 129, .4); background: rgba(126, 224, 129, .05); }
+.coach-action .ca-ok {
+  font-family: var(--font-mono); font-size: 12px; color: var(--good);
+  letter-spacing: .1em;
+}
+
 /* ── LIFT HUD ───────────────────────────────────────────────────────── */
 /* Everything here is sized to be read at arm's length with a bar in your
    hands. The dense panel is better for editing; this is better for lifting. */

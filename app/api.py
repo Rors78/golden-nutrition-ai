@@ -3,6 +3,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import platform
 import secrets
 import sys
@@ -1237,8 +1238,15 @@ def coach_chat():
         'profile_notes': d['profile'].get('notes', ''),
     })
     history = d.get('coach_chat', [])
+    # Agentic path when the API is available: the coach can propose writes.
+    # Falls back to plain prose on the CLI, which has no tool-use channel.
+    actions = []
     try:
-        reply = ai.coach_chat(persona_prompt(coach), history, message, snapshot)
+        if os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('ANTHROPIC_AUTH_TOKEN'):
+            out = ai.coach_chat_agentic(persona_prompt(coach), history, message, snapshot)
+            reply, actions = out['text'], out['actions']
+        else:
+            reply = ai.coach_chat(persona_prompt(coach), history, message, snapshot)
     except Exception as e:
         return _err(e, 502)
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -1246,7 +1254,103 @@ def coach_chat():
     history.append({'role': 'coach', 'text': reply, 'ts': now, 'coach': coach['id']})
     d['coach_chat'] = history[-40:]
     store.save(d)
-    return jsonify({'reply': reply, 'coach': coach['id']})
+    # Actions are PROPOSALS. They are returned for the user to confirm and are
+    # deliberately not executed here — see /coach/act.
+    return jsonify({'reply': reply, 'coach': coach['id'], 'actions': actions})
+
+
+# What the coach is allowed to propose, and how each one is carried out. An
+# explicit allow-list rather than dispatching on a model-supplied name: a tool
+# the model invents must do nothing at all.
+COACH_ACTIONS = {
+    'log_meal': lambda d, a: d['meals'].append(_normalize_meal(a)),
+    'log_weight': lambda d, a: _agent_log_weight(d, a),
+    'log_workout': lambda d, a: _agent_log_workout(d, a),
+    'log_measurement': lambda d, a: _agent_log_measurement(d, a),
+    'set_calorie_goal': lambda d, a: d['profile'].__setitem__(
+        'daily_calories', clean_num(a.get('calories'))),
+}
+
+
+def _agent_log_weight(d, a):
+    day = date.today().isoformat()
+    lbs = clean_num(a.get('weight'), float)
+    if lbs <= 0:
+        raise ValueError('Weight must be above 0.')
+    d['weights'] = [w for w in d['weights'] if w['date'] != day]
+    d['weights'].append({'date': day, 'weight': lbs})
+    d['weights'].sort(key=lambda w: w['date'])
+    d['profile']['weight'] = lbs
+
+
+def _agent_log_workout(d, a):
+    # Same flat shape the /api/workouts endpoint writes — sets/reps/weight as
+    # numbers, keyed on 'exercise'. stats.training_strain multiplies these
+    # directly, so a nested set-array here would break the volume maths.
+    exercises = []
+    for ex in (a.get('exercises') or []):
+        name = str(ex.get('exercise', '')).strip()
+        if not name:
+            continue
+        exercises.append({
+            'exercise': name,
+            'sets': clean_num(ex.get('sets')),
+            'reps': clean_num(ex.get('reps')),
+            'weight': clean_num(ex.get('weight'), float),
+        })
+    if not exercises:
+        raise ValueError('No exercises in that workout.')
+    d['workouts'].append({
+        'date': date.today().isoformat(),
+        'time': datetime.now().strftime('%H:%M'),
+        'name': str(a.get('name', 'Session')).strip() or 'Session',
+        'duration': 0, 'intensity': 'Moderate', 'notes': 'Logged by coach',
+        'exercises': exercises,
+    })
+
+
+def _agent_log_measurement(d, a):
+    day = date.today().isoformat()
+    row = {'date': day}
+    for f in MEASURE_FIELDS:
+        if a.get(f) not in (None, ''):
+            val = clean_num(a[f], float)
+            if val > 0:
+                row[f] = val
+    if len(row) == 1:
+        raise ValueError('No measurements in that action.')
+    d.setdefault('measurements', [])
+    for m in d['measurements']:
+        if m['date'] == day:
+            m.update({k: v for k, v in row.items() if k != 'date'})
+            break
+    else:
+        d['measurements'].append(row)
+    d['measurements'].sort(key=lambda m: m['date'])
+
+
+@bp.post('/coach/act')
+def coach_act():
+    """Execute a coach-proposed action the user has confirmed.
+
+    The confirmation happens in the UI; this endpoint is the only path from a
+    proposal to the data file, and it accepts nothing outside COACH_ACTIONS.
+    """
+    body = request.get_json(force=True)
+    tool = str(body.get('tool', ''))
+    handler = COACH_ACTIONS.get(tool)
+    if not handler:
+        return _err(f'Unknown coach action: {tool or "(none)"}.', 400)
+    payload = body.get('input')
+    if not isinstance(payload, dict):
+        return _err('That action had no usable payload.')
+    d = store.load()
+    try:
+        handler(d, payload)
+    except Exception as e:
+        return _err(str(e) or 'That action could not be applied.')
+    store.save(d)
+    return jsonify({'ok': True, 'tool': tool})
 
 
 @bp.delete('/coach/chat')
