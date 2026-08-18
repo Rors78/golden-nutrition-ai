@@ -469,6 +469,142 @@ def supplement_advice(profile, persona, context):
     return advice
 
 
+# ── agentic coach: the coach can propose writes, never perform them ─────────
+#
+# Tool use turns the coach from something that talks about your data into
+# something that can act on it: "I benched 225 for 5" logs the set instead of
+# producing a paragraph about how good that is.
+#
+# The hard rule: the model PROPOSES, the human DISPOSES. Every tool call comes
+# back as a pending action the user confirms in the UI, and the server executes
+# only what was confirmed. Nothing the model emits reaches nutrition_data.json
+# without a person saying yes. A coach that could silently write to the record
+# would be the same class of failure as the briefing that wrote a crypto essay
+# into it (SCARS #10) — except this one would look like the user's own data.
+COACH_TOOLS = [
+    {
+        "name": "log_meal",
+        "description": ("Record something the athlete says they ate. Use when they "
+                        "state food in the past tense. Estimate macros from typical "
+                        "portions if they did not give numbers."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Short dish name"},
+                "protein": {"type": "integer"}, "calories": {"type": "integer"},
+                "carbs": {"type": "integer"}, "fat": {"type": "integer"},
+                "fiber": {"type": "integer"},
+            },
+            "required": ["name", "protein", "calories", "carbs", "fat", "fiber"],
+        },
+    },
+    {
+        "name": "log_weight",
+        "description": "Record a weigh-in the athlete reports, in pounds.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"weight": {"type": "number"}},
+            "required": ["weight"],
+        },
+    },
+    {
+        "name": "log_workout",
+        "description": ("Record a training session the athlete describes, with the "
+                        "exercises and sets they actually did."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Session name, e.g. Push Day"},
+                "exercises": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "exercise": {"type": "string"},
+                            "sets": {"type": "integer",
+                                     "description": "number of sets performed"},
+                            "reps": {"type": "integer",
+                                     "description": "reps per set"},
+                            "weight": {"type": "number",
+                                       "description": "working weight in lbs"},
+                        },
+                        "required": ["exercise", "sets", "reps", "weight"],
+                    },
+                },
+            },
+            "required": ["name", "exercises"],
+        },
+    },
+    {
+        "name": "log_measurement",
+        "description": "Record tape measurements in inches. Only the sites given.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "neck_in": {"type": "number"}, "chest_in": {"type": "number"},
+                "waist_in": {"type": "number"}, "hips_in": {"type": "number"},
+                "arm_in": {"type": "number"}, "thigh_in": {"type": "number"},
+            },
+        },
+    },
+    {
+        "name": "set_calorie_goal",
+        "description": ("Change the athlete's daily calorie target. Only when they "
+                        "ask for it or agree to a change you proposed."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"calories": {"type": "integer"},
+                           "why": {"type": "string"}},
+            "required": ["calories", "why"],
+        },
+    },
+]
+
+AGENT_RULES = (
+    "\n\nYou have tools that record data for the athlete. Use them whenever they "
+    "report something logable — a meal eaten, a weigh-in, a session trained, a "
+    "tape measurement — instead of telling them to go log it themselves. Call the "
+    "tool AND reply in your voice in the same turn.\n"
+    "Every tool call is shown to the athlete for confirmation before anything is "
+    "saved, so propose confidently, but never claim in your reply that something "
+    "IS saved — say what you are logging. If they are only asking a question, "
+    "just answer it; do not invent entries."
+)
+
+
+def coach_chat_agentic(persona, history, message, snapshot):
+    """One coach turn that can propose data writes.
+
+    Returns {'text': str, 'actions': [{tool, input}]}. Actions are PROPOSALS —
+    the caller is responsible for confirming them with a human before executing.
+    SDK-only: tool use needs the structured API, and the CLI path returns prose.
+    """
+    convo = "\n".join(f"{'Athlete' if m['role'] == 'user' else 'Coach'}: {m['text']}"
+                      for m in history[-12:])
+    ask = (
+        "You are in an ongoing chat with your athlete.\n\n"
+        f"Their live data right now: {snapshot}\n\n"
+        + (f"Recent conversation:\n{convo}\n\n" if convo else "")
+        + f"Athlete: {message}\n\n"
+        "Reply in your coaching voice, under 150 words unless they ask for detail. "
+        "Use their actual numbers. For anything medical, tell them to see a "
+        "professional rather than coaching through it."
+    )
+    response = _sdk_create(
+        model=CLAUDE_MODEL,
+        max_tokens=8000,
+        system=persona + AGENT_RULES,
+        messages=[{"role": "user", "content": ask}],
+        tools=COACH_TOOLS,
+    )
+    if response.stop_reason == "refusal":
+        raise RuntimeError("Claude declined to process this request.")
+    text = "".join(b.text for b in response.content if b.type == "text").strip()
+    actions = [{"tool": b.name, "input": b.input}
+               for b in response.content if b.type == "tool_use"]
+    return {"text": text, "actions": actions}
+
+
 def coach_chat(persona, history, message, snapshot):
     """One turn of live coach chat: persona voice, grounded in the athlete's
     current data snapshot, aware of the recent conversation."""

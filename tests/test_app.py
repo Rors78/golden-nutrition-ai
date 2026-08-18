@@ -2101,3 +2101,89 @@ def test_partial_tape_does_not_fake_a_body_fat_reading(client):
     v = client.get("/api/vessel").get_json()
     assert v["composition"]["have"] is True, "waist + neck completes the formula"
     assert v["composition"]["bf_pct"] > 0
+
+
+# ── agentic coach: the model proposes, the human disposes ──────────────────
+# The whole safety property is that nothing the model emits reaches the data
+# file without a person confirming it. These tests are that boundary.
+
+def test_proposed_actions_are_not_executed(client, monkeypatch):
+    """The chat endpoint must return proposals and write NOTHING.
+
+    A coach that could silently write to the record would be worse than the
+    briefing that wrote a crypto essay into it (SCARS #10) — this output would
+    look like the user's own data.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(ai, "coach_chat_agentic", lambda p, h, m, s: {
+        "text": "Logging that now.",
+        "actions": [{"tool": "log_weight", "input": {"weight": 199.0}}],
+    })
+
+    r = client.post("/api/coach/chat", json={"message": "I weighed 199 today"})
+    assert r.status_code == 200
+    assert r.get_json()["actions"][0]["tool"] == "log_weight"
+    # The proposal exists; the weigh-in does not.
+    assert client.get("/api/state").get_json()["weights"] == []
+
+
+def test_confirmed_action_writes(client):
+    """The confirm endpoint is the only path from proposal to data file."""
+    r = client.post("/api/coach/act",
+                    json={"tool": "log_weight", "input": {"weight": 199.0}})
+    assert r.status_code == 200
+    weights = client.get("/api/state").get_json()["weights"]
+    assert len(weights) == 1 and weights[0]["weight"] == 199.0
+
+
+def test_unknown_tool_is_refused(client):
+    """Dispatch is an allow-list. A tool the model invents must do nothing."""
+    before = client.get("/api/export/backup.json").get_json()
+    r = client.post("/api/coach/act",
+                    json={"tool": "delete_everything", "input": {"confirm": True}})
+    assert r.status_code == 400
+    assert "Unknown coach action" in r.get_json()["error"]
+    assert client.get("/api/export/backup.json").get_json() == before
+
+
+def test_malformed_action_payload_is_refused(client):
+    assert client.post("/api/coach/act",
+                       json={"tool": "log_weight", "input": "199"}).status_code == 400
+    assert client.post("/api/coach/act",
+                       json={"tool": "log_weight", "input": {"weight": -5}}).status_code == 400
+    assert client.get("/api/state").get_json()["weights"] == []
+
+
+def test_agent_can_log_every_kind_it_proposes(client):
+    """Each allow-listed action actually lands in the right place."""
+    client.post("/api/coach/act", json={"tool": "log_meal", "input": {
+        "name": "Steak", "protein": 52, "calories": 610, "carbs": 0,
+        "fat": 38, "fiber": 0}})
+    client.post("/api/coach/act", json={"tool": "log_workout", "input": {
+        "name": "Push Day",
+        "exercises": [{"exercise": "Bench Press", "sets": 3,
+                       "reps": 5, "weight": 225}]}})
+    client.post("/api/coach/act", json={"tool": "log_measurement",
+                                        "input": {"waist_in": 37.0}})
+    client.post("/api/coach/act", json={"tool": "set_calorie_goal",
+                                        "input": {"calories": 2400, "why": "cut"}})
+    s = client.get("/api/state").get_json()
+    assert s["meals"][0]["name"] == "Steak" and s["meals"][0]["protein"] == 52
+    ex = s["workouts"][0]["exercises"][0]
+    assert ex["exercise"] == "Bench Press" and ex["weight"] == 225 and ex["sets"] == 3
+    # The volume engine must be able to read what the coach wrote.
+    assert s["stats"]["training"]["volume_7d"] == 3 * 5 * 225
+    assert s["measurements"][0]["waist_in"] == 37.0
+    assert s["profile"]["daily_calories"] == 2400
+
+
+def test_chat_without_api_key_falls_back_to_prose(client, monkeypatch):
+    """No API key means no tool-use channel. It must still answer, with no
+    actions, rather than erroring."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(ai, "coach_chat", lambda p, h, m, s: "Log it in Meals.")
+
+    r = client.post("/api/coach/chat", json={"message": "I ate eggs"})
+    assert r.status_code == 200
+    assert r.get_json()["actions"] == []

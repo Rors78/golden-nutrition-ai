@@ -118,6 +118,56 @@ export function renderCoach(root, state) {
   const log = chatCard.querySelector('.chat-log');
   const coachById = id => (state.coaches || []).find(c => c.id === id);
 
+  // A coach-proposed write, shown for confirmation. The model never touches
+  // the data file directly — this card is the only path from proposal to save,
+  // and it always states exactly what will be written.
+  const ACTION_LABEL = {
+    log_meal: 'Log this meal', log_weight: 'Log this weigh-in',
+    log_workout: 'Log this session', log_measurement: 'Log these measurements',
+    set_calorie_goal: 'Change your calorie goal',
+  };
+
+  function actionSummary(a) {
+    const i = a.input || {};
+    switch (a.tool) {
+      case 'log_meal':
+        return `${i.name} — ${i.protein}g protein · ${i.calories} cal`;
+      case 'log_weight':
+        return `${i.weight} lbs today`;
+      case 'log_workout':
+        return `${i.name} — ${(i.exercises || []).map(e =>
+          `${e.exercise} ${e.sets}×${e.reps} @ ${e.weight}`).join(' · ')}`;
+      case 'log_measurement':
+        return Object.entries(i).map(([k, v]) => `${k.replace('_in', '')} ${v}"`).join(' · ');
+      case 'set_calorie_goal':
+        return `${i.calories} cal/day — ${i.why}`;
+      default:
+        return JSON.stringify(i);
+    }
+  }
+
+  function actionCard(a) {
+    const card = el(`<div class="coach-action">
+      <div class="ca-head">${esc(ACTION_LABEL[a.tool] || a.tool)}</div>
+      <div class="ca-body">${esc(actionSummary(a))}</div>
+      <div class="ca-btns">
+        <button type="button" class="gold-btn ca-yes">Save it</button>
+        <button type="button" class="ghost-btn ca-no">Dismiss</button>
+      </div>
+    </div>`);
+    card.querySelector('.ca-no').addEventListener('click', () => card.remove());
+    card.querySelector('.ca-yes').addEventListener('click', async ev => {
+      ev.target.disabled = true;
+      try {
+        await api('POST', '/coach/act', { tool: a.tool, input: a.input });
+        card.classList.add('done');
+        card.querySelector('.ca-btns').innerHTML = '<span class="ca-ok">✓ Saved</span>';
+        await refresh();
+      } catch (e) { ev.target.disabled = false; toast(e.message); }
+    });
+    return card;
+  }
+
   function bubble(m) {
     if (m.role === 'user') {
       return el(`<div class="chat-msg user">${esc(m.text)}<span class="chat-ts">${esc(m.ts || '')}</span></div>`);
@@ -149,8 +199,11 @@ export function renderCoach(root, state) {
     log.append(thinking);
     log.scrollTop = log.scrollHeight;
     try {
-      const { reply } = await api('POST', '/coach/chat', { message });
-      thinking.replaceWith(bubble({ role: 'coach', text: reply, coach: state.coach, ts: 'now' }));
+      const { reply, actions } = await api('POST', '/coach/chat', { message });
+      const said = bubble({ role: 'coach', text: reply, coach: state.coach, ts: 'now' });
+      thinking.replaceWith(said);
+      // The coach proposes; nothing is written until the athlete confirms.
+      (actions || []).forEach(a => said.after(actionCard(a)));
     } catch (err) {
       thinking.remove();
       toast(err.message);
