@@ -2060,3 +2060,44 @@ def test_vessel_fuel_target_names_its_source(client):
     assert v["fuel"]["target_source"] == "profile"
     assert v["fuel"]["confidence"] == "low", "no adaptive TDEE yet"
     assert v["fuel"]["kcal"] == 0, "zero eaten today is a real zero"
+
+
+# ── logging through the figure ─────────────────────────────────────────────
+# Tapping a ring posts one site. The backend has to accept that and merge it
+# into the day's row, or the whole interaction is a dead end.
+
+def test_single_site_post_is_accepted_and_merges(client):
+    """Tap the waist ring, then the neck ring: one row, both values."""
+    assert client.post("/api/measurements", json={"waist_in": 37.2}).status_code == 200
+    assert client.post("/api/measurements", json={"neck_in": 15.4}).status_code == 200
+    rows = client.get("/api/state").get_json()["measurements"]
+    assert len(rows) == 1, "same day must merge, not append"
+    assert rows[0]["waist_in"] == 37.2 and rows[0]["neck_in"] == 15.4
+
+
+def test_tapping_one_ring_promotes_the_figure(client):
+    """A single site is enough to move off the estimated rung for that site."""
+    client.post("/api/profile", json={"sex": "male", "height_in": 71})
+    assert client.get("/api/vessel").get_json()["body"]["fidelity"] == "estimated"
+
+    client.post("/api/measurements", json={"waist_in": 37.2})
+    b = client.get("/api/vessel").get_json()["body"]
+    assert b["fidelity"] == "full"
+    assert b["measured_sites"] == ["waist_in"], "only what was actually taped"
+    # The unmeasured sites are null, not zero — the renderer must be able to
+    # tell "not taped" from "taped as nothing".
+    assert b["tape_in"]["chest_in"] is None
+
+
+def test_partial_tape_does_not_fake_a_body_fat_reading(client):
+    """Waist alone cannot produce a Navy estimate. It must stay silent."""
+    client.post("/api/profile", json={"sex": "male", "height_in": 71})
+    client.post("/api/measurements", json={"waist_in": 37.2})
+    v = client.get("/api/vessel").get_json()
+    assert v["composition"]["have"] is False
+    assert v["composition"]["bf_pct"] is None
+
+    client.post("/api/measurements", json={"neck_in": 15.4})
+    v = client.get("/api/vessel").get_json()
+    assert v["composition"]["have"] is True, "waist + neck completes the formula"
+    assert v["composition"]["bf_pct"] > 0

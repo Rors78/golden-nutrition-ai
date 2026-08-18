@@ -530,6 +530,14 @@ dialog form { display: grid; gap: 12px; }
   opacity: 0; transition: opacity .4s; white-space: nowrap;
 }
 .vessel-state.show { opacity: .85; }
+/* Top of the frame: the voyage block owns the bottom, and a hint that
+   overlaps it is unreadable exactly when it matters. */
+.vessel-hint {
+  position: absolute; top: 36px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; letter-spacing: .24em; text-transform: uppercase;
+  color: #f2a63c; opacity: 0; transition: opacity .18s; white-space: nowrap;
+}
+.vessel-hint.show { opacity: .95; }
 @media (max-width: 720px) {
   .vessel-hud .vh-lab { font-size: 8px; letter-spacing: .16em; }
   .vessel-hud small { font-size: 9px; }
