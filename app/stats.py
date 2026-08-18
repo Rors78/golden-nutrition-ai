@@ -271,9 +271,27 @@ def body_comp(data):
         else:
             hint = ('Log waist and neck (plus hips for the female formula) '
                     'to estimate body fat.')
+    # Age of the reading, so a stale measurement stops being presented as
+    # current. A tape set from 90 days ago is structurally identical to one
+    # from this morning, and confidently drawing it asserts a body that no
+    # longer exists — healthy-by-absence wearing a different hat.
+    age_days = None
+    if series:
+        try:
+            age_days = (date.today() - date.fromisoformat(series[-1]['date'])).days
+        except ValueError:
+            age_days = None
     return {
         'series': series,
         'current': series[-1]['bf'] if series else None,
+        'measured_on': series[-1]['date'] if series else None,
+        'age_days': age_days,
+        # Degrades with age rather than flipping at one threshold: a 3-week-old
+        # tape is still worth showing, a 3-month-old one is a historical note.
+        'confidence': (None if age_days is None
+                       else 'current' if age_days <= 21
+                       else 'aging' if age_days <= 60
+                       else 'stale'),
         'change': (round(series[-1]['bf'] - series[0]['bf'], 1)
                    if len(series) >= 2 else None),
         'hint': hint,

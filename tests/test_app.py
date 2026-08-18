@@ -1921,3 +1921,53 @@ def test_briefing_returns_once_there_is_something_to_brief_on(client):
     client.post("/api/meals", json={"name": "Eggs", "protein": 30, "calories": 400})
     dash = client.get("/api/state").get_json()["stats"]["dashboard"]
     assert any(a["id"] == "briefing" for a in dash["actions"])
+
+
+# ── a tape reading has an age, and an old one must not look current ────────
+
+def _tape_on(client, day, waist=37.0, neck=15.4):
+    client.post("/api/profile", json={"sex": "male", "height_in": 71,
+                                      "weight": 214, "goal_weight": 190})
+    client.post("/api/measurements",
+                json={"date": day, "waist_in": waist, "neck_in": neck})
+    return client.get("/api/state").get_json()["stats"]["body_comp"]
+
+
+def test_fresh_tape_reads_as_current(client):
+    bc = _tape_on(client, date.today().isoformat())
+    assert bc["current"] is not None
+    assert bc["age_days"] == 0
+    assert bc["confidence"] == "current"
+
+
+def test_old_tape_is_marked_stale_not_presented_as_now(client):
+    """A 90-day-old tape set is structurally identical to this morning's.
+
+    Drawing it with the same confidence asserts a body that no longer exists —
+    the same healthy-by-absence failure as measuring app liveness instead of
+    user logging (SCARS #7).
+    """
+    bc = _tape_on(client, (date.today() - timedelta(days=90)).isoformat())
+    assert bc["current"] is not None, "the number is still shown"
+    assert bc["age_days"] == 90
+    assert bc["confidence"] == "stale", "but it must not read as current"
+
+
+@pytest.mark.parametrize("age,expected", [(20, "current"), (40, "aging"), (75, "stale")])
+def test_tape_confidence_degrades_rather_than_flipping(client, age, expected):
+    """Three bands, not a binary: a 3-week-old tape is still good.
+
+    Parametrized so each age gets a fresh data file — measurements upsert by
+    date and the newest row is what body_comp reports, so reusing one client
+    would just re-measure the most recent entry.
+    """
+    bc = _tape_on(client, (date.today() - timedelta(days=age)).isoformat())
+    assert bc["confidence"] == expected
+
+
+def test_no_tape_means_no_confidence_claim(client):
+    """Absent is not stale, and it is certainly not current."""
+    bc = client.get("/api/state").get_json()["stats"]["body_comp"]
+    assert bc["current"] is None
+    assert bc["age_days"] is None
+    assert bc["confidence"] is None

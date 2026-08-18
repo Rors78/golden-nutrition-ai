@@ -479,6 +479,48 @@ dialog form { display: grid; gap: 12px; }
   .onboarding .ob-step { grid-template-columns: 20px 1fr; }
 }
 
+/* ── guided tape form ───────────────────────────────────────────────── */
+.tape-date { display: block; max-width: 170px; margin-bottom: 12px; }
+.tape-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+}
+.tape-field {
+  display: block; padding: 10px 11px; border: 1px solid var(--line);
+  border-radius: var(--radius-sm); background: var(--card-2);
+}
+/* The two sites the body-fat formula actually consumes read differently from
+   the four that only track shape. */
+.tape-field.key { border-color: var(--gold-dim); }
+.tape-field .tf-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 5px;
+}
+.tape-field .tf-tag {
+  font-family: var(--font-mono); font-style: normal; font-size: 9px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--bg);
+  background: var(--gold); border-radius: 3px; padding: 1px 4px;
+}
+.tape-field input { width: 100%; }
+.tape-field .tf-how {
+  display: block; margin-top: 6px; font-size: 11.5px; line-height: 1.45;
+  color: var(--muted);
+}
+.tape-submit {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px;
+}
+.tape-note { font-size: 12px; color: var(--muted); }
+/* The reading dims as it ages — an old number should not look as confident as
+   a fresh one. */
+.bf-read { color: var(--gold-bright); }
+.bf-read.aging { color: var(--gold); opacity: .8; }
+.bf-read.stale {
+  color: var(--muted); opacity: .75; text-decoration: underline dotted var(--muted);
+}
+.tape-stale {
+  margin: 6px 0 0; font-size: 12px; color: var(--warn);
+}
+
 /* ── first-run onboarding ───────────────────────────────────────────── */
 .onboarding {
   margin: 4px 0 14px;

@@ -269,6 +269,23 @@ function renderPhotos(root, state) {
 const TAPE_FIELDS = [['neck_in', 'Neck'], ['chest_in', 'Chest'], ['waist_in', 'Waist'],
   ['hips_in', 'Hips'], ['arm_in', 'Arm'], ['thigh_in', 'Thigh']];
 
+// Where to put the tape. Placement error is the whole game: a waist measured
+// at the navel one week and at the narrowest point the next produces a change
+// that is pure noise, and the app cannot tell the difference. These are the
+// standard anthropometric sites, phrased so they land the same way every time.
+const TAPE_HOWTO = {
+  neck_in: 'Just below the larynx, tape sloping slightly down at the front. Do not flex.',
+  chest_in: 'Across the nipples, arms relaxed at your sides, at the end of a normal breath out.',
+  waist_in: 'At the navel, not the narrowest point. Relaxed — do not suck in.',
+  hips_in: 'The widest point of the glutes, feet together.',
+  arm_in: 'Midway between shoulder and elbow, arm hanging relaxed. Same arm every time.',
+  thigh_in: 'Just below the glute fold, weight on both feet. Same leg every time.',
+};
+
+// Which sites the Navy body-fat formula actually consumes. The rest are for
+// tracking shape change; they do not feed the estimate.
+const NAVY_SITES = { male: ['waist_in', 'neck_in'], female: ['waist_in', 'neck_in', 'hips_in'] };
+
 // Tape measurements + Navy body-fat estimate. Renders even before the first
 // weigh-in — the tape and the scale are independent habits.
 function renderTape(root, state) {
@@ -276,20 +293,37 @@ function renderTape(root, state) {
   const bc = state.stats.body_comp || {};
   const last = ms[ms.length - 1], prev = ms[ms.length - 2];
   const today = new Date().toISOString().slice(0, 10);
+  const needed = NAVY_SITES[(state.profile.sex || '').toLowerCase()] || [];
 
   const card = el(`<div class="card" style="margin-top:14px">
     <p class="chart-title">Tape measurements${bc.current != null
-      ? ` · <span style="color:var(--gold-bright)">~${bc.current}% body fat</span>${
+      ? ` · <span class="bf-read ${esc(bc.confidence || '')}">~${bc.current}% body fat</span>${
         bc.change != null ? ` <span style="font-size:11px;color:${bc.change <= 0 ? 'var(--good)' : 'var(--warn)'}">(${bc.change > 0 ? '+' : ''}${bc.change} since first)</span>` : ''}`
       : ''}</p>
+    ${bc.confidence && bc.confidence !== 'current' ? `<p class="tape-stale">Last measured ${
+      bc.age_days} days ago — ${bc.confidence === 'stale'
+        ? 'too old to describe you now. Re-tape to make this current.'
+        : 'starting to age. A fresh set keeps the trend honest.'}</p>` : ''}
     <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">Inches, same conditions every time — morning, relaxed, tape snug not tight. One row per day; re-logging a day updates it.${
       bc.current != null ? ' Body fat is the US Navy tape estimate — track the trend, not the decimal.' : ''}</p>
     ${bc.hint ? `<div class="callout" style="margin-bottom:10px">${esc(bc.hint)}</div>` : ''}
-    <form class="form-row" style="align-items:flex-end">
-      <label style="flex:0 1 150px">Date <input name="date" type="date" value="${today}"></label>
-      ${TAPE_FIELDS.map(([f, label]) => `<label style="flex:0 1 92px">${label}
-        <input name="${f}" type="number" step="0.1" min="0" inputmode="decimal" placeholder="${last?.[f] ?? '—'}"></label>`).join('')}
-      <button class="gold-btn" type="submit" style="flex:0 1 auto">Log tape</button>
+    <form class="tape-form">
+      <label class="tape-date">Date <input name="date" type="date" value="${today}"></label>
+      <div class="tape-grid">
+        ${TAPE_FIELDS.map(([f, label]) => `<label class="tape-field${needed.includes(f) ? ' key' : ''}">
+          <span class="tf-head">${label}${needed.includes(f)
+            ? '<i class="tf-tag" title="Feeds the body-fat estimate">bf</i>' : ''}</span>
+          <input name="${f}" type="number" step="0.1" min="0" max="99" inputmode="decimal"
+                 placeholder="${last?.[f] ?? '—'}">
+          <small class="tf-how">${esc(TAPE_HOWTO[f] || '')}</small>
+        </label>`).join('')}
+      </div>
+      <div class="tape-submit">
+        <button class="gold-btn" type="submit">Log tape</button>
+        <span class="tape-note">${esc(needed.length
+          ? `Waist and neck alone give the body-fat estimate — the rest track shape.`
+          : 'Set your sex in Profile and waist + neck will estimate body fat.')}</span>
+      </div>
     </form>
     <div class="tape-latest" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"></div>
     <div class="tape-chart-slot"></div>
@@ -297,8 +331,20 @@ function renderTape(root, state) {
 
   card.querySelector('form').addEventListener('submit', async e => {
     e.preventDefault();
+    const entries = Object.fromEntries(new FormData(e.target).entries());
+    // A tape jump of >2 inches in one logging is almost always the tape in a
+    // different place, not the body. Confirming beats silently recording a
+    // number that will read as real change forever afterwards.
+    if (last) {
+      const odd = TAPE_FIELDS
+        .filter(([f]) => entries[f] && last[f] && Math.abs(+entries[f] - last[f]) > 2)
+        .map(([f, label]) => `${label}: ${last[f]}" → ${(+entries[f]).toFixed(1)}"`);
+      if (odd.length && !confirm(
+        `That is a big change since your last tape:\n\n${odd.join('\n')}\n\n`
+        + `Usually this means the tape sat somewhere different. Log it anyway?`)) return;
+    }
     try {
-      await api('POST', '/measurements', Object.fromEntries(new FormData(e.target).entries()));
+      await api('POST', '/measurements', entries);
       toast('Tape logged');
       await refresh();
     } catch (err) { toast(err.message); }
