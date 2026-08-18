@@ -349,8 +349,23 @@ document.getElementById('restore-input')?.addEventListener('change', async ev =>
   try {
     const body = JSON.parse(await file.text());
     const res = await api('POST', '/import/backup', body);
-    toast(`Restored: ${res.meals} meals, ${res.workouts} workouts, ${res.weights} weigh-ins`);
+    const counts = `${res.meals} meals, ${res.workouts} workouts, ${res.weights} weigh-ins`;
     await refresh();
+    const missing = res.secrets_need_reentry || [];
+    if (missing.length) {
+      // Restores happen after disk failures and migrations — exactly when
+      // nobody audits a settings panel. This is a step in the flow, not amber
+      // on a badge that gets read next week.
+      const names = { ntfy_topic: 'notification topic (Vitals tab)' };
+      alert(`Restored: ${counts}\n\n`
+        + `${missing.length} machine-local setting needs re-entry — backups do `
+        + `not carry credentials:\n\n`
+        + missing.map(k => `  • ${names[k] || k}`).join('\n')
+        + `\n\nUntil it is set, the sentinel, briefing, and price-watch jobs `
+        + `have nowhere to push.`);
+    } else {
+      toast(`Restored: ${counts}`);
+    }
   } catch (e) {
     toast(e.message.startsWith('Unexpected') ? 'That file is not valid JSON.' : e.message);
   }

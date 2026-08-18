@@ -1780,6 +1780,76 @@ def test_restore_keeps_machine_local_secrets(client):
     assert after["ingest_token"] == before["ingest_token"]
 
 
+def test_restore_onto_fresh_machine_reports_what_it_could_not_keep(client):
+    """The case the naive preserve-fix got wrong.
+
+    On a fresh install there is nothing to preserve, so the topic ends up
+    absent. An empty string would be indistinguishable from never-configured
+    and the loss would be silent — the sentinel dead with nobody told, which is
+    the exact bug shape from SCARS #8 returning through a new door.
+    """
+    from app import data as store
+    backup = client.get("/api/export/backup.json").get_json()
+    assert "ntfy_topic" not in backup["settings"], "precondition: backups are stripped"
+
+    r = client.post("/api/import/backup", json=backup)
+    assert r.status_code == 200
+    assert r.get_json()["secrets_need_reentry"] == ["ntfy_topic"]
+
+    # State, not just an empty value: 'cleared by restore' != 'never set'.
+    d = store.load()
+    assert store.secret_state(d, "ntfy_topic") == store.SECRET_CLEARED_BY_RESTORE
+
+    pulse = client.get("/api/system").get_json()
+    assert any("cleared by a restore" in w for w in pulse["warnings"])
+    assert not any("No notification topic" in w for w in pulse["warnings"])
+
+
+def test_never_set_topic_reads_as_never_set(client):
+    """The other side of the distinction — a fresh install that was never
+    configured must not claim a restore dropped anything."""
+    from app import data as store
+    assert store.secret_state(store.load(), "ntfy_topic") == store.SECRET_NEVER_SET
+    pulse = client.get("/api/system").get_json()
+    assert any("No notification topic" in w for w in pulse["warnings"])
+    assert not any("cleared by a restore" in w for w in pulse["warnings"])
+
+
+def test_reentering_the_topic_clears_the_restore_flag(client):
+    """A flag that never clears is noise."""
+    from app import data as store
+    backup = client.get("/api/export/backup.json").get_json()
+    client.post("/api/import/backup", json=backup)
+
+    client.post("/api/settings", json={"ntfy_topic": "back-in-business"})
+    d = store.load()
+    assert store.secret_state(d, "ntfy_topic") == store.SECRET_PRESENT
+    pulse = client.get("/api/system").get_json()
+    assert not any("cleared by a restore" in w for w in pulse["warnings"])
+
+
+def test_restore_onto_existing_install_preserves_and_says_so(client):
+    """Existing install: nothing is lost, and the response says which keys
+    survived rather than leaving it to be inferred."""
+    client.post("/api/settings", json={"ntfy_topic": "still-here"})
+    backup = client.get("/api/export/backup.json").get_json()
+
+    body = client.post("/api/import/backup", json=backup).get_json()
+    assert "ntfy_topic" in body["secrets_preserved"]
+    assert body["secrets_need_reentry"] == []
+    after = client.get("/api/state").get_json()["settings"]
+    assert after["ntfy_topic"] == "still-here"
+
+
+def test_secret_state_bookkeeping_never_leaves_the_machine(client):
+    """secret_states is metadata about credentials — it must not ride along in
+    an export, or a restore would import another machine's history."""
+    backup = client.get("/api/export/backup.json").get_json()
+    client.post("/api/import/backup", json=backup)
+    exported = client.get("/api/export/backup.json").get_json()
+    assert "secret_states" not in exported["settings"]
+
+
 def test_validate_rejects_structurally_wrong_payloads():
     from app import data as store
     assert store.validate(store.DEFAULT_DATA) == []

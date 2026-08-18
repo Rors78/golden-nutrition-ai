@@ -80,7 +80,10 @@ def save(data):
 #              record, it outlives the context that explains it, and it is the
 #              one field that has already been observed carrying foreign
 #              content (SCARS #10).
-EXPORT_STRIP_SETTINGS = ('ntfy_topic', 'ingest_token')
+# secret_states is machine-local bookkeeping about the keys above, not user
+# data — it must not ride along either, or a restore would import another
+# machine's lifecycle history.
+EXPORT_STRIP_SETTINGS = ('ntfy_topic', 'ingest_token', 'secret_states')
 EXPORT_STRIP_TOP = ('briefing',)
 
 
@@ -99,6 +102,45 @@ def for_export(data):
         for k in EXPORT_STRIP_SETTINGS:
             settings.pop(k, None)
     return out
+
+
+# Lifecycle of a machine-local secret, kept separately from its value.
+#
+# An empty string cannot carry two meanings. "" meant both "never configured"
+# and "a restore dropped this" — indistinguishable, so the second case was
+# silent, which is how the sentinel ended up dead with nobody told (SCARS #8).
+# Every secret stripped from backups inherits this shape, not just ntfy_topic:
+# ingest_token happens to self-heal on /api/state, but the next non-regenerable
+# one will not.
+SECRET_NEVER_SET = 'never_set'
+SECRET_PRESENT = 'present'
+SECRET_CLEARED_BY_RESTORE = 'cleared_by_restore'
+
+SECRET_STATE_KEY = 'secret_states'
+
+
+def secret_state(data, key):
+    """Lifecycle state of one machine-local secret.
+
+    Derived from the value where possible so existing files need no migration;
+    an explicitly recorded state (set by restore) wins, since that carries
+    information the value itself cannot.
+    """
+    settings = data.get('settings') or {}
+    if str(settings.get(key) or '').strip():
+        return SECRET_PRESENT
+    recorded = (settings.get(SECRET_STATE_KEY) or {}).get(key)
+    if recorded in (SECRET_CLEARED_BY_RESTORE,):
+        return recorded
+    return SECRET_NEVER_SET
+
+
+def mark_secret_cleared(data, key, at):
+    """Record that a restore emptied `key`, so it is distinguishable later."""
+    settings = data.setdefault('settings', {})
+    states = settings.setdefault(SECRET_STATE_KEY, {})
+    states[key] = SECRET_CLEARED_BY_RESTORE
+    states[f'{key}_at'] = at
 
 
 def validate(data):
