@@ -460,7 +460,16 @@ def coach_chat(persona, history, message, snapshot):
 
 
 def daily_briefing(profile, persona, context):
-    """A short morning briefing in the coach's voice: plan, focus, one nudge."""
+    """A short morning briefing in the coach's voice: plan, focus, one nudge.
+
+    SDK-ONLY, deliberately — this is the one feature that must not use the CLI.
+    `claude -p` is an agent primitive: it carries the user's global skills
+    registry, memory, and tool preamble into every invocation, and none of that
+    can be fenced off from here (a neutral cwd does not do it — see SCARS #10).
+    An unattended 07:00 job that writes its output straight into the user's data
+    file cannot afford ambient context; a briefing is a stateless completion, so
+    it is issued as one. Interactive features keep the CLI-first order.
+    """
     ask = (
         "Good morning, coach. Give me my daily briefing.\n\n"
         f"My profile: {json.dumps(profile)}\n"
@@ -471,22 +480,22 @@ def daily_briefing(profile, persona, context):
         "3) one specific nudge based on my recent data (vitals, adherence, weigh-ins). "
         "End with one short line of your signature energy."
     )
-    if cli_available():
-        return _run_cli(f"{persona}\n\n{ask}", timeout=240)
-    if backend_name():
-        response = _sdk_create(
-            model=CLAUDE_MODEL,
-            max_tokens=8000,
-            system=persona,
-            messages=[{"role": "user", "content": ask}],
+    if not (os.environ.get("ANTHROPIC_API_KEY")
+            or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        raise AIUnavailable(
+            "The daily briefing needs ANTHROPIC_API_KEY (it runs on the API, not "
+            "the Claude Code CLI, so no outside context can leak into it). Set the "
+            "key in the environment the briefing task runs under."
         )
-        if response.stop_reason == "refusal":
-            raise RuntimeError("Claude declined to process this request.")
-        return next(b.text for b in response.content if b.type == "text")
-    raise AIUnavailable(
-        "No Claude backend found. Install Claude Code and log in (uses your "
-        "Claude subscription), or set ANTHROPIC_API_KEY."
+    response = _sdk_create(
+        model=CLAUDE_MODEL,
+        max_tokens=8000,
+        system=persona,
+        messages=[{"role": "user", "content": ask}],
     )
+    if response.stop_reason == "refusal":
+        raise RuntimeError("Claude declined to process this request.")
+    return next(b.text for b in response.content if b.type == "text")
 
 
 def parse_meal_photo(image_path):
