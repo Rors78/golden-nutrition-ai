@@ -13,6 +13,21 @@ import { el, esc, api, toast, refresh } from '../app.js';
 // Which torso slice belongs to which measurable site, so a tap on a ring knows
 // what it is asking for. Only real sites appear here — the interpolated
 // shoulder/rib rings are not tappable, because there is nothing to log.
+// Change heat: cool where the body came in, warm where it grew. Rendered on
+// the ring itself rather than as a chart, because "where did I change" is a
+// question about a body and a bar chart cannot answer it.
+//
+// Scale caps at 6 mm radial — roughly 1.5 in of circumference — which is a
+// large real change over a month. Beyond that the colour saturates rather than
+// running away, so a mismeasurement cannot paint the whole figure.
+const HEAT_CAP_MM = 6;
+function heatColor(mm, alpha) {
+  const k = Math.min(1, Math.abs(mm) / HEAT_CAP_MM);
+  return mm < 0
+    ? `rgba(110,180,255,${(0.25 + 0.65 * k) * alpha})`   // came in
+    : `rgba(255,140,80,${(0.25 + 0.65 * k) * alpha})`;   // grew
+}
+
 const RING_SITES = [
   { y: 9.2, key: 'neck_in', label: 'Neck',
     how: 'Just below the larynx, tape sloping slightly down at the front.' },
@@ -58,6 +73,7 @@ function slices(tape, breath) {
 
 export function renderVessel(root, state) {
   const wrap = el(`<div class="vessel-wrap">
+    <button type="button" class="vessel-mode" data-f="modeBtn" hidden>Change map</button>
     <canvas class="vessel-canvas"></canvas>
     <div class="vessel-hud">
       <div class="vh vh-tl"><span class="vh-lab">Fuel · today</span>
@@ -72,6 +88,7 @@ export function renderVessel(root, state) {
         <b class="vh-voy" data-f="voy">—</b><small data-f="eta">—</small></div>
       <div class="vessel-state" data-f="stateTag"></div>
       <div class="vessel-hint" data-f="hint"></div>
+      <div class="vessel-change" data-f="changeBox"></div>
     </div>
   </div>`);
   root.append(wrap);
@@ -83,6 +100,7 @@ export function renderVessel(root, state) {
   let W = 0, H = 0, raf = 0, t0 = performance.now();
   let V = null;                       // the payload; null until first fetch
   let hot = null;                     // ring under the pointer, if any
+  let showChange = false;             // change-map overlay on/off
   const D = { kcal: 0, prot: 0, acr: 0, bf: 0 };   // eased display values
 
   function resize() {
@@ -183,6 +201,28 @@ export function renderVessel(root, state) {
     }
     stack(sl.torso, 0, cxp, ppi, rot, alpha, shellK);
 
+    // ── change map: heat on the sites that actually moved ──
+    if (showChange && V.change?.has_data) {
+      for (const s of V.change.sites) {
+        if (!s.significant) continue;
+        const site = RING_SITES.find(r => r.key === s.site);
+        if (!site) continue;
+        const c = (b.tape_in || {})[s.site];
+        if (!c) continue;
+        const rp = (c / Math.PI / 2) * ppi;
+        const py = site.y * ppi;
+        // two passes: a soft halo for presence, a hard ring for the reading
+        cx.beginPath();
+        cx.ellipse(cxp, py, rp * 1.14, rp * 1.14 * TILT, 0, 0, TAU);
+        cx.strokeStyle = heatColor(s.delta_mm, 0.45);
+        cx.lineWidth = 9; cx.stroke();
+        cx.beginPath();
+        cx.ellipse(cxp, py, rp, rp * TILT, 0, 0, TAU);
+        cx.strokeStyle = heatColor(s.delta_mm, 1);
+        cx.lineWidth = 2.4; cx.stroke();
+      }
+    }
+
     // the ring under the pointer lights up, so the target is legible before
     // the tap rather than discovered by it
     if (hot) {
@@ -269,6 +309,31 @@ export function renderVessel(root, state) {
       F.eta.textContent = 'step on the scale to begin the voyage';
     }
 
+    // ── change map readout ──
+    const ch = V.change;
+    F.modeBtn.hidden = !ch?.has_data;
+    F.modeBtn.textContent = showChange ? 'Hide change' : 'Change map';
+    F.modeBtn.classList.toggle('on', showChange);
+    if (showChange && ch?.has_data) {
+      const rows = ch.sites.filter(s => s.significant)
+        .sort((a2, b2) => Math.abs(b2.delta_mm) - Math.abs(a2.delta_mm))
+        .map(s => `<span class="cg-row ${s.direction}">
+          <i>${esc(s.site.replace('_in', ''))}</i>
+          ${s.delta_mm > 0 ? '+' : ''}${s.delta_mm.toFixed(1)} mm
+          <small>${s.delta_in > 0 ? '+' : ''}${s.delta_in.toFixed(2)}"</small></span>`).join('');
+      F.changeBox.innerHTML = ch.unchanged
+        ? `<div class="cg-head">No measurable change</div>
+           <div class="cg-note">Every site is inside the ±${ch.noise_floor_mm} mm
+           tape noise floor over ${ch.span_days} days. That is a real answer,
+           not a missing one.</div>`
+        : `<div class="cg-head">${ch.span_days} days · radial change</div>${rows}
+           <div class="cg-note">Cool = came in · warm = grew ·
+           under ±${ch.noise_floor_mm} mm is tape noise and is not shown</div>`;
+      F.changeBox.classList.add('show');
+    } else {
+      F.changeBox.classList.remove('show');
+    }
+
     const tag = { full: '', estimated: 'ESTIMATED FIGURE — LOG A TAPE SET',
                   generic: 'UNMEASURED — ADD HEIGHT AND A TAPE SET' }[b.fidelity];
     F.stateTag.textContent = tag || (b.confidence === 'stale'
@@ -351,6 +416,8 @@ export function renderVessel(root, state) {
       await refresh();
     } catch (e) { toast(e.message); }
   });
+
+  F.modeBtn.addEventListener('click', () => { showChange = !showChange; });
 
   api('GET', '/vessel').then(v => { V = v; }).catch(() => {});
   raf = requestAnimationFrame(frame);

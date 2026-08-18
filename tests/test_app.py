@@ -2187,3 +2187,70 @@ def test_chat_without_api_key_falls_back_to_prose(client, monkeypatch):
     r = client.post("/api/coach/chat", json={"message": "I ate eggs"})
     assert r.status_code == 200
     assert r.get_json()["actions"] == []
+
+
+# ── change map: where the body moved, in radial millimetres ────────────────
+
+def _two_tapes(client, first, second, days_apart=30):
+    client.post("/api/profile", json={"sex": "male", "height_in": 71})
+    client.post("/api/measurements", json={
+        "date": (date.today() - timedelta(days=days_apart)).isoformat(), **first})
+    client.post("/api/measurements", json=second)
+    return client.get("/api/vessel").get_json()["change"]
+
+
+def test_change_needs_two_tape_sets(client):
+    """One set is a position, not a change."""
+    assert client.get("/api/vessel").get_json()["change"]["has_data"] is False
+    client.post("/api/measurements", json={"waist_in": 37.2})
+    ch = client.get("/api/vessel").get_json()["change"]
+    assert ch["has_data"] is False
+    assert "Two tape sets" in ch["note"]
+
+
+def test_change_is_reported_in_radial_millimetres(client):
+    """Circumference is what you measure; radius is what you see.
+
+    A 1 inch drop around the waist is only ~4 mm off the surface. Quoting the
+    inch makes the change feel bigger than it looks in the mirror.
+    """
+    ch = _two_tapes(client, {"waist_in": 39.0}, {"waist_in": 38.0})
+    waist = next(s for s in ch["sites"] if s["site"] == "waist_in")
+    assert waist["delta_in"] == -1.0
+    # 1 inch of circumference = 1/(2pi) inch of radius = ~4.04 mm
+    assert waist["delta_mm"] == pytest.approx(-4.0, abs=0.1)
+    assert waist["direction"] == "down"
+    assert waist["significant"] is True
+
+
+def test_tape_noise_is_not_reported_as_change(client):
+    """Repeat measurements scatter ~0.25 in even done carefully.
+
+    A trend built from that scatter is worse than no trend, so anything under
+    the floor is flat and explicitly not significant.
+    """
+    ch = _two_tapes(client, {"waist_in": 37.2}, {"waist_in": 37.35})
+    waist = next(s for s in ch["sites"] if s["site"] == "waist_in")
+    assert abs(waist["delta_mm"]) < ch["noise_floor_mm"]
+    assert waist["direction"] == "flat"
+    assert waist["significant"] is False
+    assert ch["unchanged"] is True
+    assert ch["biggest"] is None, "nothing cleared the floor, so no headline"
+
+
+def test_change_headline_is_the_largest_real_movement(client):
+    ch = _two_tapes(client,
+                    {"waist_in": 39.0, "chest_in": 43.0, "neck_in": 15.4},
+                    {"waist_in": 38.0, "chest_in": 43.6, "neck_in": 15.42})
+    assert ch["biggest"]["site"] == "waist_in", "the biggest mover, not the first"
+    assert ch["span_days"] == 30
+    # direction is per-site: a cut waist and a grown chest in one reading
+    by = {s["site"]: s["direction"] for s in ch["sites"]}
+    assert by["waist_in"] == "down" and by["chest_in"] == "up"
+    assert by["neck_in"] == "flat", "0.02in is noise, not neck growth"
+
+
+def test_change_skips_sites_not_measured_in_both(client):
+    """You cannot difference a site that only exists on one side."""
+    ch = _two_tapes(client, {"waist_in": 39.0}, {"waist_in": 38.0, "arm_in": 15.1})
+    assert [s["site"] for s in ch["sites"]] == ["waist_in"]
