@@ -1,5 +1,6 @@
 """JSON API consumed by the single-page frontend."""
 import csv
+import hashlib
 import io
 import json
 import platform
@@ -516,9 +517,51 @@ def _body_comp_brief(d):
             'method': bc['method']} if bc['current'] is not None else None
 
 
+BRIEFING_LOGGED_KINDS = ('meals', 'workouts', 'weights', 'vitals',
+                         'supplements', 'measurements')
+
+
+def _briefing_has_material(d):
+    """True when there is anything real to brief on.
+
+    A briefing generated from an empty file is not a weak briefing, it is a
+    fabrication: with every field None/[] the model has nothing to work from and
+    fills the space from whatever else is in its context. Refusing is the honest
+    output. (This is how a crypto-fleet essay ended up in nutrition_data.json —
+    SCARS #10.)
+    """
+    return any(d.get(k) for k in BRIEFING_LOGGED_KINDS)
+
+
+def _briefing_is_plausible(text, context_json):
+    """Reject output that cannot be a nutrition briefing for this user.
+
+    Not a content filter — a containment check on the one field that gets
+    persisted unattended. Catches the empty/garbage/wrong-domain cases; a merely
+    mediocre briefing still passes, which is correct.
+    """
+    body = (text or '').strip()
+    # Deliberately a floor, not a length standard: several coaches on the roster
+    # are terse by design ("Run. Eat. Stay hard."). This catches empty and
+    # truncated-to-nothing, and leaves style alone.
+    if len(body) < 15:
+        return 'the briefing came back empty or truncated'
+    # Wrong-domain tells: this app has no bots, ports, or trading anything.
+    stray = ('crypto', 'trading bot', 'fleet', 'portfolio pool', 'event bus',
+             'dashboard port', 'repository', 'subprocess')
+    low = body.lower()
+    hit = next((w for w in stray if w in low), None)
+    if hit:
+        return f'the briefing mentioned "{hit}" — that is not nutrition output'
+    return None
+
+
 @bp.post('/briefing')
 def briefing():
     d = store.load()
+    if not _briefing_has_material(d):
+        return _err('Nothing logged yet — log a meal, a lift, or a weigh-in and '
+                    'the morning briefing has something to work from.', 422)
     coach = get_coach(d['profile'].get('coach', DEFAULT_COACH))
     today = date.today().isoformat()
     week = (d.get('plan') or {}).get('plan', {}).get('week', [])
@@ -551,7 +594,18 @@ def briefing():
         text = ai.daily_briefing(d['profile'], persona_prompt(coach), context)
     except Exception as e:
         return _err(e, 502)
-    d['briefing'] = {'date': today, 'coach': coach['id'], 'text': text}
+    bad = _briefing_is_plausible(text, context)
+    if bad:
+        # Never persist output that failed the gate — a wrong briefing in the
+        # data file outlives the run that produced it and reads as history.
+        return _err(f'Briefing rejected before saving: {bad}.', 502)
+    d['briefing'] = {
+        'date': today, 'coach': coach['id'], 'text': text,
+        # Provenance: which input produced this text. Makes "was this generated
+        # from real data?" checkable after the fact instead of inferred.
+        'input_sha': hashlib.sha256(context.encode('utf-8')).hexdigest()[:16],
+        'source': 'api',
+    }
     store.save(d)
     try:
         notify.push(d['settings'], f"{coach['name']} — morning briefing", text[:400])

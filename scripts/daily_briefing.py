@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import create_app  # noqa: E402
 
 
+EXIT_NOTHING_TO_BRIEF = 4
+
+
 def main():
     app = create_app()
     with app.test_client() as client:
@@ -22,6 +25,12 @@ def main():
         if res.status_code == 200:
             print(f"Briefing generated for {body.get('date')} by {body.get('coach')}")
             return 0
+        if res.status_code == 422:
+            # Nothing logged: a real condition, not a malfunction. Distinct exit
+            # code so Task Scheduler shows "no data" apart from "it broke" —
+            # and never 0, which would claim a briefing that does not exist.
+            print(f"No briefing today: {body.get('error')}", file=sys.stderr)
+            return EXIT_NOTHING_TO_BRIEF
         print(f"Briefing failed: {body.get('error', res.status)}", file=sys.stderr)
         return 1
 

@@ -156,3 +156,51 @@ starts that task if the server is down rather than spawning its own copy.
 
 **If you start it from a shell instead:** it dies with the shell, and the desktop
 shortcut can end up racing a second server on the same port.
+
+---
+
+## 10. False green: a healthy backend that wrote someone else's project into the data file
+
+**Incident.** The 07:00 briefing for 2026-08-18 was stored in `nutrition_data.json`
+as a Claude Code response about an 18-bot crypto trading fleet, COSMOS
+dashboards, and a 14-engine math council — none of which exist in this app. The
+AI backend was healthy the whole time: it connected, responded, and returned
+fluent prose. Every scheduled task reported success.
+
+**Cause — not the two obvious ones.** It was not a walked-up project
+`CLAUDE.md` (there is no user-global one on the box) and not the memory
+directory. `app/ai.py` **already** ran the CLI with
+`cwd=tempfile.gettempdir()` and the comment "neutral cwd: no project context
+leaks in" — and the contamination happened anyway. Reading the actual session
+transcript for the 07:00 run showed the source: the **user-global skills
+registry**. Skill descriptions (`fleet-status`, `bot-onboard`, ...) are injected
+into every `claude -p` invocation so the model can pick relevant ones. They are
+registered at user scope, so they follow the binary regardless of cwd, project,
+or memory. A neutral cwd cannot fence this off.
+
+**The compounding failure.** Every list in the file was empty. With no data,
+there was nothing to brief on, so the model filled the space from the only
+context it had. The endpoint then did `store.save(d)` on the result with no
+validation — a wrong record written into the user's history, where it reads as
+fact afterward.
+
+**Fix.** Three parts, all needed:
+1. `ai.daily_briefing()` is **SDK-only**. A briefing is a stateless completion;
+   `claude -p` is an agent primitive carrying skills, memory, tools, and an
+   environment preamble — all contamination surface this feature does not use.
+   Interactive features keep the CLI-first order (they are supervised).
+2. `_briefing_has_material()` refuses (422) before calling the AI at all when
+   nothing is logged. An empty briefing is not a weak briefing, it is invention.
+3. `_briefing_is_plausible()` gates the text **before** `store.save`, and the
+   stored record carries `input_sha` — a hash of the exact context that produced
+   it, so provenance is checkable later instead of inferred.
+
+**If you undo it:** the 07:00 job silently resumes writing whatever ambient
+context the CLI happens to carry that morning into the user's permanent record —
+and since the backend is genuinely healthy, no health check will ever notice.
+An observability fix would not have caught this one; only a correctness gate does.
+
+**The general rule:** for any unattended job that *persists* its output, validate
+before the write, not after. And prefer the narrowest primitive that does the
+job — an agent where a completion suffices is an open context surface you are
+not using but still inherit.

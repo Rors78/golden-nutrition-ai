@@ -4,6 +4,7 @@ Each test runs against a fresh app in an isolated temp cwd, so the real
 nutrition_data.json is never touched. AI endpoints are monkeypatched — no
 Claude backend or credentials are needed.
 """
+import hashlib
 import json
 from datetime import date, timedelta
 
@@ -420,7 +421,8 @@ def test_ai_contexts_include_body_data(client, monkeypatch):
     captured = {}
 
     monkeypatch.setattr(ai, "daily_briefing",
-                        lambda p, persona, context: captured.update(brief=context) or "ok")
+                        lambda p, persona, context: captured.update(brief=context)
+                        or "Solid week. Hit your protein and keep the steps up today.")
     assert client.post("/api/briefing").status_code == 200
     assert '"body_comp"' in captured["brief"]
     assert '"tape_latest"' in captured["brief"]
@@ -934,6 +936,7 @@ def test_adherence_series(client):
 
 
 def test_briefing_reports_low_supplements(client, monkeypatch):
+    client.post("/api/meals", json={"name": "Eggs", "protein": 30, "calories": 400})
     client.post("/api/schedule", json={"name": "Fish Oil", "time": "Evening", "servings": 3})
     seen = {}
     monkeypatch.setattr(ai, "daily_briefing",
@@ -1280,7 +1283,8 @@ def test_dashboard_command_center(client, monkeypatch):
     # a generated briefing clears the briefing action
     from app import notify
     monkeypatch.setattr(notify, "push", lambda *a, **k: True)
-    monkeypatch.setattr(ai, "daily_briefing", lambda p, per, c: "Go lift.")
+    monkeypatch.setattr(ai, "daily_briefing",
+                        lambda p, per, c: "Go lift. Protein first, steps after.")
     client.post("/api/briefing")
     dash = client.get("/api/state").get_json()["stats"]["dashboard"]
     assert not any(a["id"] == "briefing" for a in dash["actions"])
@@ -1340,6 +1344,7 @@ def test_settings_and_notify(client, monkeypatch):
 
 def test_briefing_generates_pushes_and_caches(client, monkeypatch):
     client.post("/api/coach/select", json={"id": "goggins"})
+    client.post("/api/meals", json={"name": "Eggs", "protein": 30, "calories": 400})
     from app import notify
     pushed = {}
     monkeypatch.setattr(notify, "push", lambda st, title, msg, priority='default':
@@ -1611,3 +1616,78 @@ def test_csv_export(client):
     assert res.status_code == 200
     assert b"Rice" in res.data
     assert client.get("/api/export/nope.csv").status_code == 404
+
+
+# ── briefing containment (SCARS #10) ────────────────────────────────────────
+# The 07:00 briefing writes into nutrition_data.json unattended. These guard the
+# three ways that write can be wrong: no data to brief on, output from outside
+# this app's domain, and no record of which input produced the text.
+
+def test_briefing_refuses_on_empty_data(client, monkeypatch):
+    """An empty file must not produce a briefing at all.
+
+    With every stat None/[] the model has nothing to work from and fills the
+    space from ambient context — that is exactly how a crypto-fleet essay got
+    persisted. Refusal is the correct output, and the AI is never even called.
+    """
+    seed({"profile": {"name": "Test"}, "meals": [], "workouts": [], "weights": [],
+          "supplements": [], "supplement_schedule": []})
+    called = []
+    monkeypatch.setattr(ai, "daily_briefing",
+                        lambda p, per, c: called.append(1) or "should not run")
+
+    r = client.post("/api/briefing")
+    assert r.status_code == 422
+    assert "Nothing logged yet" in r.get_json()["error"]
+    assert not called, "the AI was called despite there being nothing to brief on"
+    assert client.get("/api/state").get_json().get("briefing") is None
+
+
+def test_briefing_rejects_out_of_domain_output_before_saving(client, monkeypatch):
+    """Contaminated output must be refused, and must not reach the data file."""
+    seed(week_of_data())
+    monkeypatch.setattr(ai, "daily_briefing", lambda p, per, c: (
+        "Your 18-bot crypto fleet is healthy. The COSMOS dashboard is rendering "
+        "and the event bus is current. Portfolio pool reservations look clean."))
+
+    r = client.post("/api/briefing")
+    assert r.status_code == 502
+    assert "rejected before saving" in r.get_json()["error"]
+    # The real failure mode is persistence, not the status code.
+    assert client.get("/api/state").get_json().get("briefing") is None
+
+
+def test_briefing_records_the_input_that_produced_it(client, monkeypatch):
+    """Provenance: the stored briefing carries a hash of its own input."""
+    seed(week_of_data())
+    seen = {}
+
+    def fake_brief(profile, persona, context):
+        seen["context"] = context
+        return "Lift heavy, eat your protein, get your steps in today."
+    monkeypatch.setattr(ai, "daily_briefing", fake_brief)
+
+    assert client.post("/api/briefing").status_code == 200
+    stored = client.get("/api/state").get_json()["briefing"]
+    expected = hashlib.sha256(seen["context"].encode("utf-8")).hexdigest()[:16]
+    assert stored["input_sha"] == expected
+    assert stored["source"] == "api"
+
+
+def test_briefing_never_uses_the_cli(monkeypatch):
+    """The briefing must not go through `claude -p`.
+
+    The CLI carries the user's global skills registry and memory into every
+    invocation regardless of cwd, so an unattended job that persists its output
+    cannot use it. Interactive features still may.
+    """
+    monkeypatch.setattr(ai, "cli_available", lambda: True)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+
+    def explode(*a, **k):
+        raise AssertionError("briefing reached the CLI path")
+    monkeypatch.setattr(ai, "_run_cli", explode)
+
+    with pytest.raises(ai.AIUnavailable, match="ANTHROPIC_API_KEY"):
+        ai.daily_briefing({"name": "Test"}, "persona", "{}")
