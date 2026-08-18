@@ -242,6 +242,71 @@ addEventListener('hashchange', render);
 // ── profile dialog ──────────────────────────────────────────────────────
 const dialog = document.getElementById('profile-dialog');
 const form = document.getElementById('profile-form');
+// ── live sync: an open tab stays current on its own ─────────────────────
+// Without this a tab left open is frozen: the day rolls over, entries land
+// from the phone, a coach action lands in another window, and the screen
+// never notices. Polls a small endpoint and only re-fetches state when the
+// data file has actually changed.
+(function initLiveSync() {
+  const SLOW = 30000, FAST = 6000;
+  let rev = null, day = null, timer = 0, busy = false;
+
+  // The sentinel computes these and pushes them to a phone. On this machine
+  // there is no ntfy topic, so they reach nobody — and a screen that is
+  // already open is the obvious second place to say it. Same pure function
+  // server-side, so the two can never disagree.
+  function paintAlerts(list) {
+    let bar = document.getElementById('alert-bar');
+    if (!list.length) { bar?.remove(); return; }
+    if (!bar) {
+      bar = el(`<div id="alert-bar" class="alert-bar"></div>`);
+      document.querySelector('.tabs').after(bar);
+    }
+    const text = list.join(' · ');
+    if (bar.dataset.text === text) return;   // don't re-paint identical content
+    bar.dataset.text = text;
+    bar.innerHTML = '';
+    bar.append(el(`<div class="ab-in"><span class="ab-dot"></span>
+      <span class="ab-text">${esc(text)}</span></div>`));
+  }
+
+  async function beat(force = false) {
+    // Never poll a hidden tab on the interval — a background tab hammering the
+    // server for hours is the same battery complaint as an unpaused canvas
+    // loop. `force` is for the first beat, which must land even when the tab
+    // is restored in the background: otherwise the alert bar never appears
+    // until the user happens to focus the window.
+    if (busy || document.body.classList.contains('demo-on')) return;
+    if (document.hidden && !force) return;
+    busy = true;
+    try {
+      const p = await api('GET', '/pulse');
+      // Day rollover: "today" is now a different day, so every today-scoped
+      // panel on screen is stale even though no data changed.
+      if (day && p.server_date !== day) { day = p.server_date; await refresh(); }
+      else if (rev !== null && p.rev !== rev) await refresh();
+      rev = p.rev; day = p.server_date;
+      window.LivePulse = p;
+      paintAlerts(p.alerts || []);
+    } catch { /* offline or server restarting — try again next beat */ }
+    finally { busy = false; }
+  }
+
+  function schedule() {
+    clearInterval(timer);
+    // Poll faster while a live session is running: the rest timer and set
+    // dots are the one place a few seconds of staleness is visible.
+    const live = !!localStorage.getItem('gna-live-session');
+    timer = setInterval(beat, live ? FAST : SLOW);
+  }
+
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) beat(); });
+  // Another tab logged something — react immediately rather than waiting.
+  addEventListener('storage', ev => { if (ev.key === 'gna-live-session') schedule(); });
+  schedule();
+  beat(true);
+})();
+
 // ── demo mode: the shop-window loop ─────────────────────────────────────
 // Lazily imported so the demo dataset never loads for normal use.
 let stopDemo = null;

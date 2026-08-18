@@ -9,6 +9,7 @@ import platform
 import re
 import secrets
 import sys
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -295,6 +296,53 @@ def vessel_preview():
             'watch_insights': stats.watch_insights(d),
             'coach_fit': stats.coach_fit(d),
         },
+    })
+
+
+@bp.get('/pulse')
+def live_pulse():
+    """A cheap 'has anything changed' token, plus what is live right now.
+
+    An open tab is otherwise frozen: the day rolls over, entries land from the
+    phone, and the screen never notices. This is polled every few seconds, so
+    it must stay small and must not do the work /api/state does — the client
+    only re-fetches state when `rev` moves.
+
+    `rev` is the data file's mtime, which is exactly the question being asked
+    ("did the file change"). Note this is NOT a liveness signal and must never
+    be used as one — mtime moves on ordinary app activity, which is precisely
+    how the quiet-logging alert ended up unable to fire (SCARS #7).
+    """
+    df = store.DATA_FILE
+    rev = int(df.stat().st_mtime * 1000) if df.exists() else 0
+    d = store.load()
+    today = date.today().isoformat()
+    totals = stats.today_summary(d)['totals']
+    p = d['profile']
+
+    # Alerts the sentinel would push, surfaced in-app for a screen that is
+    # already open. Same pure function, so the two can never disagree.
+    backup_age = None
+    snaps = sorted(Path('backups').glob('nutrition_data-*.json')) \
+        if Path('backups').is_dir() else []
+    if snaps:
+        backup_age = (time.time() - snaps[-1].stat().st_mtime) / 86400
+    alerts = stats.sentinel_alerts(d, backup_age_days=backup_age)
+
+    return jsonify({
+        'rev': rev,
+        'server_date': today,
+        'server_time': datetime.now().strftime('%H:%M'),
+        'today': {
+            'protein': totals.get('protein', 0),
+            'protein_goal': p.get('daily_protein_g') or None,
+            'calories': totals.get('calories', 0),
+            'calorie_goal': p.get('daily_calories') or None,
+            'meals': len([m for m in d['meals'] if m['date'] == today]),
+            'workouts': len([w for w in d['workouts'] if w['date'] == today]),
+            'weighed': any(w['date'] == today for w in d['weights']),
+        },
+        'alerts': alerts,
     })
 
 
