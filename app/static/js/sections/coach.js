@@ -1,6 +1,6 @@
 // Coach: pick from the 10-coach roster, generate a weekly plan in their style,
 // get a persona-voiced review of your week, plus the rule-based numbers.
-import { el, esc, api, toast, refresh, metric, markdown, CHART } from '../app.js';
+import { coachMedallion, el, esc, api, toast, refresh, metric, markdown, CHART } from '../app.js';
 
 export function renderCoach(root, state) {
   const ins = state.stats.insights;
@@ -38,13 +38,14 @@ export function renderCoach(root, state) {
   for (const c of coaches) {
     const initials = c.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
     const card = el(`<button type="button" class="coach-card${c.id === selected?.id ? ' selected' : ''}">
-      <span class="plate-disc" style="width:44px;height:44px;font-size:14px">${esc(initials)}</span>
+      <span class="medal-slot" data-initials="${esc(initials)}"></span>
       <span class="coach-name">${esc(c.name)}
         ${fitIds.has(c.id) ? '<span style="font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--good);border:1px solid var(--good);border-radius:999px;padding:2px 7px;margin-left:6px;vertical-align:middle">good fit</span>' : ''}</span>
       <span class="coach-style">${esc(c.style)}</span>
       <span class="coach-goal">${esc(c.goal)}</span>
       <span class="coach-vibe">${esc(c.vibe)}</span>
     </button>`);
+    card.querySelector('.medal-slot').append(coachMedallion(c, 48));
     card.addEventListener('click', async () => {
       if (c.id === state.coach) return;
       try {

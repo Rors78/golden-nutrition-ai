@@ -1,6 +1,6 @@
 // Dashboard: the command center — briefing, next actions, rings, week grid,
 // streaks, today's plan, quick weigh-in, trophies, activity.
-import { el, esc, api, toast, refresh, metric, ring, markdown, CHART } from '../app.js';
+import { coachMedallion, el, esc, api, toast, refresh, metric, ring, markdown, CHART } from '../app.js';
 
 export function renderDashboard(root, state) {
   const p = state.profile;
@@ -253,7 +253,7 @@ export function renderDashboard(root, state) {
   if (planDay) {
     const card = el(`<div class="card" style="margin-top:14px">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <span class="plate-disc" style="width:38px;height:38px;font-size:12px">${esc((coach?.name || 'C').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase())}</span>
+        <span class="medal-slot"></span>
         <div style="flex:1;min-width:200px">
           <p class="chart-title" style="margin:0">Today's plan · ${esc(todayName)}</p>
           <p style="margin:2px 0 0;font-weight:800;color:var(--gold-bright)">${esc(planDay.title)}
@@ -276,7 +276,7 @@ export function renderDashboard(root, state) {
     root.append(card);
   } else if (coach) {
     const strip = el(`<div class="card" style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <span class="plate-disc" style="width:38px;height:38px;font-size:12px">${esc(coach.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase())}</span>
+      <span class="medal-slot"></span>
       <div style="flex:1;min-width:200px">
         <p class="chart-title" style="margin:0">Coached by ${esc(coach.name)} · ${esc(coach.style)}</p>
         <p style="margin:2px 0 0;color:var(--ink-2);font-size:13px">${esc(coach.vibe)}</p>
@@ -368,6 +368,11 @@ export function renderDashboard(root, state) {
   } else {
     woCard.append(el('<div class="empty">Rest day so far. The plates are waiting in Workouts.</div>'));
   }
+
+  // mint the coach's coin into every slot the dashboard drew
+  if (coach) root.querySelectorAll('.medal-slot').forEach(sl => {
+    if (!sl.firstChild) sl.append(coachMedallion(coach, 38));
+  });
 
   two.append(mealsCard, woCard);
   root.append(two);
