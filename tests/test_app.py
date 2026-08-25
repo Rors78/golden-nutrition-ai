@@ -2585,6 +2585,36 @@ def test_log_heat_silent_on_a_cold_install(client):
     assert client.get("/api/state").get_json()["stats"]["log_heat"]["has_data"] is False
 
 
+def test_vessel_history_feeds_the_time_scrubber(client):
+    """body.history: every dated tape set, gaps filled both directions."""
+    client.post("/api/measurements", json={"date": "2026-06-01", "waist_in": 40.0,
+                                           "chest_in": 42.0})
+    client.post("/api/measurements", json={"date": "2026-07-01", "waist_in": 38.5,
+                                           "neck_in": 15.5})
+    client.post("/api/measurements", json={"date": "2026-08-01", "waist_in": 37.0})
+    h = client.get("/api/vessel").get_json()["body"]["history"]
+    assert [r["date"] for r in h] == ["2026-06-01", "2026-07-01", "2026-08-01"]
+    assert [r["tape_in"]["waist_in"] for r in h] == [40.0, 38.5, 37.0]
+    # chest measured only in set 1 carries forward; neck only in set 2 is
+    # back-filled into set 1 and carried into set 3
+    assert h[2]["tape_in"]["chest_in"] == 42.0
+    assert h[0]["tape_in"]["neck_in"] == 15.5 and h[2]["tape_in"]["neck_in"] == 15.5
+    # never-measured sites stay null in every set — the scrubber must be able
+    # to tell "not taped" from "taped as nothing"
+    assert all(r["tape_in"]["thigh_in"] is None for r in h)
+
+
+def test_vessel_history_caps_and_cold_install(client):
+    assert client.get("/api/vessel").get_json()["body"]["history"] == []
+    from datetime import date, timedelta
+    for i in range(30):
+        client.post("/api/measurements", json={
+            "date": (date.today() - timedelta(days=30 - i)).isoformat(),
+            "waist_in": 40 - i * 0.1})
+    h = client.get("/api/vessel").get_json()["body"]["history"]
+    assert len(h) == 24
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one
