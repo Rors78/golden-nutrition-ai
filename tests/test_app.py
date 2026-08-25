@@ -2691,6 +2691,40 @@ def test_exercise_catalog_covers_the_program(client):
     assert sum(1 for x in cat if x["animated"]) >= 5
 
 
+def test_fuel_plan_carb_cycles_around_the_goal_pace(client):
+    from datetime import date
+    client.post("/api/profile", json={"weight": 200, "goal_weight": 185})
+    client.post("/api/weights", json={"weight": 200})
+    client.post("/api/program", json={"days": 4})
+    fp = client.get("/api/state").get_json()["stats"]["fuel_plan"]
+    assert fp["has_data"] is True and fp["mode"] == "cut"
+    t, r = fp["training_day"], fp["rest_day"]
+    # training days eat more, and the extra arrives as carbs, not protein/fat
+    assert t["kcal"] > r["kcal"]
+    assert t["carbs"] > r["carbs"]
+    assert t["protein"] == r["protein"] == 185, "protein pins to goal weight on a cut"
+    # the week still sums to the pace: 4 training + 3 rest ~= 7 x daily delta
+    weekly = 4 * t["kcal"] + 3 * r["kcal"]
+    target = 7 * fp["maintenance"] + fp["pace_lb_wk"] * 3500
+    assert abs(weekly - target) < 7 * 60, "rounding tolerance only"
+    # no workout logged today -> rest-day targets
+    assert fp["trained_today"] is False and fp["today"] == r
+    client.post("/api/workouts", json={"name": "Lift", "duration": 60, "exercises": [
+        {"exercise": "Back Squat", "sets": 3, "reps": 5, "weight": 225}]})
+    fp = client.get("/api/state").get_json()["stats"]["fuel_plan"]
+    assert fp["trained_today"] is True and fp["today"] == fp["training_day"]
+
+
+def test_fuel_plan_honest_silence_and_estimate_label(client):
+    fp = client.get("/api/state").get_json()["stats"]["fuel_plan"]
+    assert fp["has_data"] is False and "weigh-in" in fp["note"]
+    client.post("/api/weights", json={"weight": 200})
+    fp = client.get("/api/state").get_json()["stats"]["fuel_plan"]
+    assert fp["has_data"] is True
+    assert "estimate" in fp["source"], "no adaptive TDEE yet — the source must say so"
+    assert fp["mode"] == "maintain" and fp["pace_lb_wk"] == 0
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one
