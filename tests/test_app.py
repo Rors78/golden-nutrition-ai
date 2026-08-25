@@ -2551,6 +2551,40 @@ def test_auto_regulation_silent_without_vitals(client):
     assert ar["has_data"] is False and "vitals" in ar["note"].lower()
 
 
+def test_log_heat_counts_kinds_not_entries(client):
+    from datetime import date, timedelta
+    day = (date.today() - timedelta(days=1)).isoformat()
+    for _ in range(5):
+        client.post("/api/meals", json={"name": "Snack", "protein": 10,
+                                        "calories": 100, "date": day})
+    client.post("/api/weights", json={"date": day, "weight": 200})
+    heat = client.get("/api/state").get_json()["stats"]["log_heat"]
+    assert heat["has_data"] is True
+    cell = next(c for c in heat["days"] if c["date"] == day)
+    assert cell["n"] == 2, "five meals + one weigh-in is two kinds, not six"
+
+
+def test_log_heat_streak_survives_an_empty_today(client):
+    """The day is not over — an empty today must not zero the streak."""
+    from datetime import date, timedelta
+    for back in (3, 2, 1):
+        client.post("/api/weights", json={
+            "date": (date.today() - timedelta(days=back)).isoformat(),
+            "weight": 200 + back})
+    heat = client.get("/api/state").get_json()["stats"]["log_heat"]
+    assert heat["current_streak"] == 3
+    assert heat["longest_streak"] == 3
+    # a gap two weeks back does not feed the current streak
+    client.post("/api/weights", json={
+        "date": (date.today() - timedelta(days=14)).isoformat(), "weight": 205})
+    heat = client.get("/api/state").get_json()["stats"]["log_heat"]
+    assert heat["current_streak"] == 3 and heat["days_logged"] == 4
+
+
+def test_log_heat_silent_on_a_cold_install(client):
+    assert client.get("/api/state").get_json()["stats"]["log_heat"]["has_data"] is False
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one
