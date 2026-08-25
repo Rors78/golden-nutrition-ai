@@ -185,65 +185,174 @@ export function renderWeight(root, state) {
 
 // Progress photos: dated timeline, tap two to compare side by side.
 // Files live in photos/ beside the data file — this machine only.
+// THE MIRROR - progress photos as an instrument, not a gallery.
+//
+// The wipe: both photos stacked in one frame with a divider you drag.
+// Side-by-side makes you compare two compositions; the wipe makes one body
+// change under your thumb. Ghost mode overlays the newer photo at half
+// opacity instead, for catching pose drift. Every photo is captioned with
+// the nearest weigh-in (within 10 days), so a pair reads
+// "2026-03-01 · 232.4 lb <-> 2026-08-24 · 200.0 lb · -32.4 lb · 176 days".
+
+const MIRROR_MAX_PX = 1600;   // longest edge kept on upload
+
+function nearestWeight(weights, day) {
+  let best = null, bestD = 11;          // within 10 days, or say nothing
+  for (const w of weights || []) {
+    const d = Math.abs((new Date(w.date) - new Date(day)) / 86400000);
+    if (d < bestD) { bestD = d; best = w.weight; }
+  }
+  return best;
+}
+
+// A phone photo is 8-12 MB of pixels the mirror never needs. Downscale in
+// the browser so the photos directory does not swallow the disk. Returns
+// null when the original is already small (or unreadable) - send it as-is.
+async function shrinkImage(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, MIRROR_MAX_PX / Math.max(bmp.width, bmp.height));
+    if (k === 1 && file.size < 2500000) return null;
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.85);
+  } catch { return null; }
+}
+
 function renderPhotos(root, state) {
   const ph = state.photos || [];
+  const today = new Date().toISOString().slice(0, 10);
+  const url = p => `/api/photos/${encodeURIComponent(p.file)}`;
   const card = el(`<div class="card" style="margin-top:14px">
-    <p class="chart-title">Progress photos</p>
-    <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">Same spot, same light, same pose — monthly beats daily. Stored only on this machine (photos are not inside the JSON backup). Tap two to compare.</p>
+    <p class="chart-title">The mirror</p>
+    <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">Same spot,
+      same light, same pose — monthly beats daily. Photos stay on this machine
+      (they are not inside the JSON backup). Tap two to compare, then drag the
+      line across.</p>
     <div class="form-row">
       <button type="button" class="ghost-btn ph-add" style="flex:0 1 auto">Add photo</button>
+      <label style="flex:0 1 auto">Taken on
+        <input name="date" type="date" class="ph-date" value="${today}"></label>
       <input type="file" accept="image/*" capture="environment" hidden class="ph-input">
     </div>
-    <div class="ph-strip" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
-    <div class="ph-compare" style="display:flex;gap:10px;margin-top:12px"></div>
+    <div class="ph-strip"></div>
+    <div class="mirror" hidden>
+      <div class="mirror-stage">
+        <img class="m-a" alt="earlier progress photo">
+        <div class="m-top"><img class="m-b" alt="later progress photo"></div>
+        <div class="m-line"><span></span></div>
+      </div>
+      <div class="mirror-caps">
+        <span class="m-cap-a"></span><b class="m-delta"></b><span class="m-cap-b"></span>
+      </div>
+      <div class="mirror-tools">
+        <button type="button" class="ghost-btn m-mode">Ghost view</button>
+      </div>
+    </div>
   </div>`);
 
+  // -- capture --
   const input = card.querySelector('.ph-input');
-  card.querySelector('.ph-add').addEventListener('click', () => input.click());
-  input.addEventListener('change', () => {
+  const addBtn = card.querySelector('.ph-add');
+  addBtn.addEventListener('click', () => input.click());
+  input.addEventListener('change', async () => {
     const file = input.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        await api('POST', '/photos', { image: reader.result });
-        toast('Photo added');
-        await refresh();
-      } catch (e) { toast(e.message); }
-      finally { input.value = ''; }
-    };
-    reader.readAsDataURL(file);
+    addBtn.disabled = true; addBtn.textContent = 'Adding…';
+    try {
+      const small = await shrinkImage(file);
+      const image = small || await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result); r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+      const day = card.querySelector('.ph-date').value;
+      await api('POST', '/photos', day ? { image, date: day } : { image });
+      toast('Photo added');
+      await refresh();                 // re-render resets the button
+    } catch (e) {
+      toast(e.message);
+      addBtn.disabled = false; addBtn.textContent = 'Add photo';
+    } finally { input.value = ''; }
   });
 
+  // -- the mirror itself --
+  const mirror = card.querySelector('.mirror');
+  const stage = card.querySelector('.mirror-stage');
+  const top = card.querySelector('.m-top');
+  const line = card.querySelector('.m-line');
   const sel = [];
-  const strip = card.querySelector('.ph-strip');
-  const compare = card.querySelector('.ph-compare');
-  const drawCompare = () => {
-    compare.innerHTML = '';
-    for (const i of sel) {
-      const p = ph[i];
-      compare.append(el(`<figure style="flex:1;min-width:0;margin:0">
-        <img src="/api/photos/${encodeURIComponent(p.file)}" alt="progress ${esc(p.date)}" style="width:100%;border-radius:6px">
-        <figcaption style="font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-top:4px;text-align:center">${esc(p.date)}</figcaption>
-      </figure>`));
-    }
-  };
+  let pct = 50;
 
+  function setPct(v) {
+    pct = Math.max(3, Math.min(97, v));
+    top.style.clipPath = `inset(0 0 0 ${pct}%)`;
+    line.style.left = pct + '%';
+  }
+
+  function caption(i) {
+    const lb = nearestWeight(state.weights, ph[i].date);
+    return `${ph[i].date}${lb != null ? ` · ${lb} lb` : ''}`;
+  }
+
+  function drawMirror() {
+    if (sel.length < 2) { mirror.hidden = true; return; }
+    // older on the left, newer revealed by the wipe — time reads rightward
+    const [ia, ib] = [...sel].sort((x, y) => (ph[x].date < ph[y].date ? -1 : 1));
+    card.querySelector('.m-a').src = url(ph[ia]);
+    card.querySelector('.m-b').src = url(ph[ib]);
+    card.querySelector('.m-cap-a').textContent = caption(ia);
+    card.querySelector('.m-cap-b').textContent = caption(ib);
+    const wa = nearestWeight(state.weights, ph[ia].date);
+    const wb = nearestWeight(state.weights, ph[ib].date);
+    const days = Math.round((new Date(ph[ib].date) - new Date(ph[ia].date)) / 86400000);
+    const dlb = (wa != null && wb != null)
+      ? `${wb - wa > 0 ? '+' : ''}${(wb - wa).toFixed(1)} lb · ` : '';
+    card.querySelector('.m-delta').textContent = `${dlb}${days} days`;
+    mirror.hidden = false;
+    setPct(pct);
+  }
+
+  stage.addEventListener('pointerdown', ev => {
+    if (mirror.classList.contains('ghost')) return;
+    ev.preventDefault();
+    stage.setPointerCapture(ev.pointerId);
+    const move = e => {
+      const r = stage.getBoundingClientRect();
+      setPct((e.clientX - r.left) / r.width * 100);
+    };
+    move(ev);
+    stage.addEventListener('pointermove', move);
+    stage.addEventListener('pointerup',
+      () => stage.removeEventListener('pointermove', move), { once: true });
+  });
+
+  const modeBtn = card.querySelector('.m-mode');
+  modeBtn.addEventListener('click', () => {
+    const ghost = mirror.classList.toggle('ghost');
+    modeBtn.textContent = ghost ? 'Wipe view' : 'Ghost view';
+  });
+
+  // -- the strip --
+  const strip = card.querySelector('.ph-strip');
+  const paintSel = () => {
+    [...strip.querySelectorAll('.ph-cell')].forEach((c, j) =>
+      c.classList.toggle('sel', sel.includes(j)));
+    drawMirror();
+  };
   ph.forEach((p, i) => {
-    const cell = el(`<div style="position:relative">
-      <img src="/api/photos/${encodeURIComponent(p.file)}" alt="${esc(p.date)}" loading="lazy"
-        style="height:110px;border-radius:6px;cursor:pointer;border:2px solid transparent;display:block">
-      <span style="display:block;text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-top:3px">${esc(p.date)}</span>
-      <button type="button" class="icon-btn danger" title="Delete" style="position:absolute;top:2px;right:2px">✕</button>
+    const cell = el(`<div class="ph-cell">
+      <img src="${url(p)}" alt="${esc(p.date)}" loading="lazy">
+      <span>${esc(p.date)}</span>
+      <button type="button" class="icon-btn danger" title="Delete"
+        style="position:absolute;top:2px;right:2px">✕</button>
     </div>`);
     cell.querySelector('img').addEventListener('click', () => {
       const at = sel.indexOf(i);
       if (at >= 0) sel.splice(at, 1);
       else { sel.push(i); if (sel.length > 2) sel.shift(); }
-      [...strip.querySelectorAll('img')].forEach((im, j) => {
-        im.style.borderColor = sel.includes(j) ? 'var(--gold)' : 'transparent';
-      });
-      drawCompare();
+      paintSel();
     });
     cell.querySelector('button').addEventListener('click', async ev => {
       const b = ev.target;
@@ -256,12 +365,19 @@ function renderPhotos(root, state) {
         return;
       }
       b.dataset.armed = '1';
-      toast('Tap ✕ again to delete');
-      setTimeout(() => delete b.dataset.armed, 3000);
+      b.textContent = 'sure?';
+      setTimeout(() => { delete b.dataset.armed; b.textContent = '✕'; }, 3000);
     });
     strip.append(cell);
   });
-  if (!ph.length) strip.append(el('<div class="empty" style="flex:1">No photos yet. The first one sets the baseline.</div>'));
+  if (!ph.length) {
+    strip.append(el('<div class="empty" style="flex:1">No photos yet. The first one sets the baseline the rest are measured against.</div>'));
+  }
+
+  // First and latest, pre-selected: two photos in the file means the mirror
+  // opens already showing the span, not an empty stage waiting for taps.
+  if (ph.length >= 2) { sel.push(0, ph.length - 1); }
+  paintSel();
 
   root.append(card);
 }
