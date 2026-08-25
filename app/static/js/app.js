@@ -763,6 +763,42 @@ document.getElementById('restore-input')?.addEventListener('change', async ev =>
 })();
 
 // 3D machined-plate disc with embossed monogram — coach cards & badges
+// Coach medallion: a procedural portrait. No photos — these personas
+// borrow real names, and a likeness is not ours to ship. Instead each
+// coach gets a machined commemorative coin, unique and deterministic:
+// the id hashes into the guilloche spoke count, ring count, field hue
+// and pattern rotation, with the persona's emoji as the crest. The same
+// coach mints the same coin on every machine, forever.
+export function coachMedallion(c, size = 44) {
+  let h = 0;
+  for (const ch of c.id || c.name || '?') h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const spokes = 14 + h % 12;
+  const hue = h % 360;
+  const rot = (h >> 4) % 360;
+  const rings = 2 + ((h >> 8) % 3);
+  let pattern = '';
+  for (let i = 0; i < spokes; i += 1) {
+    const a = i / spokes * 2 * Math.PI;
+    pattern += `<line x1="${(50 + Math.cos(a) * 20).toFixed(1)}" y1="${(50 + Math.sin(a) * 20).toFixed(1)}"
+      x2="${(50 + Math.cos(a) * 41).toFixed(1)}" y2="${(50 + Math.sin(a) * 41).toFixed(1)}"/>`;
+  }
+  for (let i = 0; i < rings; i += 1) {
+    pattern += `<circle cx="50" cy="50" r="${(23 + (i + 1) * (18 / (rings + 1))).toFixed(1)}" fill="none"/>`;
+  }
+  const uid = `mg-${(c.id || 'x').replace(/[^a-z0-9]/gi, '')}-${h % 97}`;
+  return el(`<svg viewBox="0 0 100 100" width="${size}" height="${size}" class="coach-medal"
+      role="img" aria-label="${esc(c.name || '')}">
+    <defs><radialGradient id="${uid}" cx="38%" cy="30%">
+      <stop offset="0%" stop-color="hsl(${hue},30%,27%)"/>
+      <stop offset="100%" stop-color="hsl(${hue},38%,9%)"/>
+    </radialGradient></defs>
+    <circle cx="50" cy="50" r="48" fill="url(#${uid})" stroke="#f2c14e" stroke-width="3.5"/>
+    <circle cx="50" cy="50" r="43" fill="none" stroke="#9c7a26" stroke-width="1"/>
+    <g stroke="hsla(${hue},55%,62%,.28)" stroke-width="1" transform="rotate(${rot} 50 50)">${pattern}</g>
+    <text x="50" y="61" text-anchor="middle" font-size="36">${esc(c.emoji || (c.name || '?')[0])}</text>
+  </svg>`);
+}
+
 export function plateDisc(text, { size = 44, tier = 'gold' } = {}) {
   const d = el(`<span class="plate-disc ${tier}" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.32)}px">${esc(text)}</span>`);
   return d;

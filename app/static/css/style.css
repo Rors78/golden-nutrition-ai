@@ -1188,3 +1188,9 @@ body.lift-open { overflow: hidden; }
   font-size: 12px; color: var(--muted);
 }
 .fp-split b { color: var(--ink); font-family: var(--font-mono); }
+
+/* -- coach medallions --------------------------------------------------- */
+.coach-medal { display: block; border-radius: 50%;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .5), 0 0 6px rgba(242, 193, 78, .18); }
+.medal-slot { display: inline-flex; flex: 0 0 auto; }
+.coach-card.selected .coach-medal { box-shadow: 0 0 14px rgba(242, 193, 78, .55); }
