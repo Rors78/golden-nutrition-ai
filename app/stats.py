@@ -396,6 +396,98 @@ def body_comp(data):
     }
 
 
+# Bodyweight-multiple thresholds for the five reference barbell lifts, at
+# the four rank boundaries (Novice / Intermediate / Advanced / Elite); below
+# the first you are Untrained. These are the widely published population
+# ladders (approximate by design) — markers on a wall, not judgements, and
+# the caveat ships inside the payload so no renderer can forget it.
+STRENGTH_RANKS = ('Untrained', 'Novice', 'Intermediate', 'Advanced', 'Elite')
+STRENGTH_STANDARDS = {
+    'Back Squat': {
+        'match': ('squat',),
+        'exclude': ('front', 'split', 'bulgarian', 'hack', 'goblet'),
+        'male': (1.0, 1.25, 1.75, 2.25), 'female': (0.75, 1.0, 1.25, 1.5)},
+    'Bench Press': {
+        'match': ('bench',),
+        'exclude': ('incline', 'decline', 'close', 'dumbbell', 'db'),
+        'male': (0.75, 1.0, 1.5, 2.0), 'female': (0.5, 0.75, 1.0, 1.25)},
+    'Deadlift': {
+        'match': ('deadlift',),
+        'exclude': ('romanian', 'rdl', 'stiff', 'single', 'deficit'),
+        'male': (1.25, 1.5, 2.0, 2.5), 'female': (0.9, 1.15, 1.5, 1.9)},
+    'Overhead Press': {
+        'match': ('overhead press', 'ohp', 'military press', 'shoulder press'),
+        'exclude': ('dumbbell', 'db', 'seated'),
+        'male': (0.55, 0.8, 1.05, 1.3), 'female': (0.4, 0.55, 0.7, 0.85)},
+    'Barbell Row': {
+        'match': ('barbell row', 'bent over row', 'bent-over row', 'pendlay'),
+        'exclude': ('dumbbell', 'db', 'cable', 'seated', 'machine'),
+        'male': (0.75, 1.0, 1.3, 1.6), 'female': (0.5, 0.7, 0.9, 1.1)},
+}
+
+
+def strength_standards(data):
+    """Where each big lift stands on the population ladder.
+
+    Best Epley e1RM per reference lift over the last 90 days (sets of 1-12
+    reps only — a 20-rep set estimates nothing), scaled to current
+    bodyweight, ranked against STRENGTH_STANDARDS, with linear progress
+    toward the next boundary. Variations that share a word but not a
+    movement (Romanian deadlift, incline bench) are excluded by name.
+    """
+    weights = sorted(data.get('weights', []), key=lambda w: w['date'])
+    bw = weights[-1]['weight'] if weights else (data['profile'].get('weight') or 0)
+    if not bw:
+        return {'has_data': False,
+                'note': 'Log a weigh-in first — the ladder is bodyweight-scaled.'}
+    sex = 'female' if (data['profile'].get('sex') or '').lower().startswith('f') else 'male'
+    cutoff = (date.today() - timedelta(days=90)).isoformat()
+
+    best = {}
+    for w in data.get('workouts', []):
+        if w.get('date', '') < cutoff:
+            continue
+        for e in w.get('exercises', []):
+            name = (e.get('exercise') or '').lower()
+            reps, wt = e.get('reps') or 0, e.get('weight') or 0
+            if not wt or not 1 <= reps <= 12:
+                continue
+            for lift, spec in STRENGTH_STANDARDS.items():
+                if any(m in name for m in spec['match']) \
+                        and not any(x in name for x in spec['exclude']):
+                    est = wt * (1 + reps / 30)
+                    if est > best.get(lift, 0):
+                        best[lift] = est
+
+    lifts = []
+    for lift, spec in STRENGTH_STANDARDS.items():
+        if lift not in best:
+            continue
+        e1 = round(best[lift])
+        ratio = e1 / bw
+        th = spec[sex]
+        passed = sum(1 for t in th if ratio >= t)      # 0..4
+        rank = STRENGTH_RANKS[passed]
+        if passed >= len(th):
+            nxt, prog, next_e1 = None, 100, None
+        else:
+            lo = th[passed - 1] if passed else 0.0
+            hi = th[passed]
+            nxt = STRENGTH_RANKS[passed + 1]
+            prog = max(0, min(100, round((ratio - lo) / (hi - lo) * 100)))
+            next_e1 = round(hi * bw)
+        lifts.append({'lift': lift, 'e1rm': e1, 'bw_ratio': round(ratio, 2),
+                      'rank': rank, 'next_rank': nxt,
+                      'progress_pct': prog, 'next_e1rm': next_e1})
+    if not lifts:
+        return {'has_data': False, 'bodyweight': bw,
+                'note': 'No barbell reference lifts in the last 90 days — '
+                        'squat, bench, deadlift, overhead press or row.'}
+    return {'has_data': True, 'bodyweight': bw, 'sex': sex, 'lifts': lifts,
+            'caveat': 'Approximate population standards for the barbell '
+                      'lifts — markers, not judgements.'}
+
+
 def progression(data):
     """Per-exercise: sorted [{date, top, volume}] from structured workout logs."""
     out = {}

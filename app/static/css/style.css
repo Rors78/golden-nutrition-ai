@@ -964,3 +964,29 @@ body.lift-open { overflow: hidden; }
   padding: 8px 18px; border-top: 1px solid var(--line);
   font-family: var(--font-mono); font-size: 10px; color: var(--muted);
 }
+
+/* -- strength standards ladder ------------------------------------------ */
+.std-list { display: grid; gap: 14px; }
+.std-head { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.std-e1 { font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); }
+.std-rank {
+  margin-left: auto; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .1em; text-transform: uppercase; padding: 2px 9px;
+  border-radius: 999px; border: 1px solid var(--line); color: var(--muted);
+}
+.std-rank.r-novice { color: var(--steel); border-color: var(--steel); }
+.std-rank.r-intermediate { color: var(--ink); border-color: var(--ink-2); }
+.std-rank.r-advanced { color: var(--gold); border-color: var(--gold-dim); }
+.std-rank.r-elite {
+  color: var(--gold-bright); border-color: var(--gold);
+  box-shadow: 0 0 10px rgba(242, 193, 78, .35);
+}
+.std-bar {
+  height: 5px; border-radius: 3px; background: var(--bg);
+  margin: 6px 0 4px; overflow: hidden;
+}
+.std-bar i {
+  display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--gold-dim), var(--gold));
+}
+.std-next { font-family: var(--font-mono); font-size: 10px; color: var(--muted); }

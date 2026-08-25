@@ -2456,6 +2456,43 @@ def test_search_finds_coaches_and_selecting_is_an_api_action(client):
     assert client.post("/api/coach/select", json={"id": cid}).status_code == 200
 
 
+def test_strength_standards_rank_the_big_lifts(client):
+    client.post("/api/profile", json={"sex": "male", "weight": 200})
+    client.post("/api/weights", json={"weight": 200})
+    client.post("/api/workouts", json={"name": "Heavy day", "duration": 60, "exercises": [
+        {"exercise": "Bench Press", "sets": 3, "reps": 5, "weight": 225},
+        {"exercise": "Back Squat", "sets": 3, "reps": 5, "weight": 315},
+        {"exercise": "Romanian Deadlift", "sets": 3, "reps": 8, "weight": 245},
+    ]})
+    ss = client.get("/api/state").get_json()["stats"]["strength_standards"]
+    assert ss["has_data"] is True and ss["bodyweight"] == 200
+    by = {l["lift"]: l for l in ss["lifts"]}
+    # Bench 225x5 -> e1RM 262 -> 1.31x bw: Intermediate, short of 1.5
+    assert by["Bench Press"]["rank"] == "Intermediate"
+    assert by["Bench Press"]["next_rank"] == "Advanced"
+    assert 0 <= by["Bench Press"]["progress_pct"] <= 100
+    # Squat 315x5 -> 367 -> 1.84x: Advanced
+    assert by["Back Squat"]["rank"] == "Advanced"
+    # An RDL is not a deadlift — the ladder must not claim one
+    assert "Deadlift" not in by
+    assert "markers" in ss["caveat"]
+
+
+def test_strength_standards_honest_silences(client):
+    """No bodyweight -> refuse with the reason; no barbell lifts -> say so."""
+    client.post("/api/workouts", json={"name": "Push", "duration": 40, "exercises": [
+        {"exercise": "Bench Press", "sets": 3, "reps": 5, "weight": 185}]})
+    ss = client.get("/api/state").get_json()["stats"]["strength_standards"]
+    assert ss["has_data"] is False and "weigh-in" in ss["note"]
+    client.post("/api/weights", json={"weight": 200})
+    client.post("/api/workouts", json={"name": "Arms", "duration": 30, "exercises": [
+        {"exercise": "Barbell Curl", "sets": 3, "reps": 10, "weight": 75}]})
+    # bench now ranks; a 20-rep set would not have (Epley stops at 12)
+    ss = client.get("/api/state").get_json()["stats"]["strength_standards"]
+    assert ss["has_data"] is True
+    assert all(l["lift"] != "Barbell Curl" for l in ss["lifts"])
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one
