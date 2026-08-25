@@ -1098,3 +1098,61 @@ body.lift-open { overflow: hidden; }
   letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
   margin-bottom: 6px;
 }
+
+/* -- form guide --------------------------------------------------------- */
+.fg-overlay {
+  position: fixed; inset: 0; z-index: 320; background: rgba(4, 6, 10, .66);
+  backdrop-filter: blur(3px); display: flex; justify-content: center;
+  align-items: flex-start; padding: 6vh 16px; overflow-y: auto;
+}
+.fg-box {
+  width: 100%; max-width: 560px; background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .6);
+}
+.fg-head {
+  display: flex; align-items: center; gap: 10px; padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.fg-head b { font-size: 16px; }
+.fg-tag {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--gold);
+}
+.fg-close {
+  margin-left: auto; background: none; border: 0; color: var(--muted);
+  font-size: 16px; cursor: pointer;
+}
+.fg-close:hover { color: var(--ink); }
+.fg-body { padding: 16px 18px 20px; }
+.fg-anim { text-align: center; margin-bottom: 6px; }
+.fg-anim canvas {
+  width: 100%; max-width: 420px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--line);
+}
+.fg-note { font-family: var(--font-mono); font-size: 11px; color: var(--steel); margin: 8px 0 0; }
+.fg-sec { margin-top: 14px; }
+.fg-sec .fg-lab {
+  display: block; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  margin-bottom: 6px;
+}
+.fg-sec ul { margin: 0; padding-left: 18px; }
+.fg-sec li { font-size: 13px; color: var(--ink-2); margin: 4px 0; line-height: 1.55; }
+.fg-sec li b { color: var(--ink); }
+.fg-sec p { font-size: 13px; color: var(--ink-2); margin: 0; line-height: 1.55; }
+.fg-sec.warn { border-left: 3px solid var(--warn); padding-left: 12px; }
+.fg-none { color: var(--ink-2); font-size: 13px; line-height: 1.6; }
+.fg-link { color: inherit; text-decoration: underline dotted var(--gold-dim); }
+.fg-link:hover { color: var(--gold-bright); }
+.fg-hint {
+  display: block; margin-top: 6px; font-family: var(--font-mono);
+  font-size: 10px; color: var(--muted); letter-spacing: .08em;
+}
+.fl-list { display: flex; gap: 8px; flex-wrap: wrap; }
+.fl-chip {
+  border: 1px solid var(--line); border-radius: 999px; background: none;
+  color: var(--ink-2); font-size: 12px; padding: 6px 13px; cursor: pointer;
+}
+.fl-chip i { font-style: normal; color: var(--gold); font-size: 9px; }
+.fl-chip:hover { border-color: var(--gold-dim); color: var(--gold-bright); }

@@ -2,6 +2,7 @@
 // load, coach-plan loading, structured logging with last-time hints + PR
 // detection, rest timer, progression charts, history.
 import { el, esc, api, toast, refresh, metric, rowActions, CHART } from '../app.js';
+import './form-guide.js';   // registers the [data-form] click handler
 import { openLiftHud } from './lift-hud.js';
 
 const TYPES = ['Push Day A (Cutler Mode)', 'Pull Day A (Cutler Mode)', 'Leg Day A (Cutler Mode)',
@@ -144,8 +145,11 @@ export function renderWorkouts(root, state) {
       <div class="pg-tms">${tmRow}</div>
       <div class="pg-next">
         <span class="pg-lab">Next session · ${PS.done_this_week}/${PS.sessions_this_week} done this week</span>
-        <b>${esc(n.lift)}</b> — ${setsTxt}, then ${n.supplemental.sets}×${n.supplemental.reps}
-        @ ${n.supplemental.weight} · ${n.accessories.map(esc).join(' + ')}
+        <b><a href="#" data-form="${esc(n.lift)}" class="fg-link">${esc(n.lift)}</a></b>
+        — ${setsTxt}, then ${n.supplemental.sets}×${n.supplemental.reps}
+        @ ${n.supplemental.weight} ·
+        ${n.accessories.map(a2 => `<a href="#" data-form="${esc(a2)}" class="fg-link">${esc(a2)}</a>`).join(' + ')}
+        <span class="fg-hint">tap a lift for form</span>
       </div>
       <div class="form-row" style="margin-top:10px">
         <button type="button" class="gold-btn pg-start" style="flex:0 1 auto">Start this session</button>
@@ -428,6 +432,23 @@ export function renderWorkouts(root, state) {
   }
 
   // ── training load & balance ──
+  // ── the form library: every movement the app can coach ──
+  const fl = el(`<div class="card" style="margin-top:14px">
+    <p class="chart-title">Form library</p>
+    <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">Setup, cues,
+      the classic faults with their fixes, breathing, and safety — for every
+      movement the program prescribes. The barbell lifts come with an animated
+      demonstration of the movement pattern and its bar path.</p>
+    <div class="fl-list"></div></div>`);
+  const flList = fl.querySelector('.fl-list');
+  api('GET', '/exercises').then(({ exercises }) => {
+    for (const x of exercises) {
+      flList.append(el(`<button type="button" class="fl-chip" data-form="${esc(x.name)}">
+        ${x.animated ? '<i>▶</i> ' : ''}${esc(x.name)}</button>`));
+    }
+  }).catch(() => { flList.append(el('<div class="empty">Library unavailable.</div>')); });
+  root.append(fl);
+
   // ── where you stand: the population ladder ──
   const ss = state.stats.strength_standards || {};
   if (ss.has_data) {
