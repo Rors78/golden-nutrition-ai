@@ -276,7 +276,7 @@ const form = document.getElementById('profile-form');
     // loop. `force` is for the first beat, which must land even when the tab
     // is restored in the background: otherwise the alert bar never appears
     // until the user happens to focus the window.
-    if (busy || document.body.classList.contains('demo-on')) return;
+    if (busy) return;
     if (document.hidden && !force) return;
     busy = true;
     try {
@@ -284,9 +284,15 @@ const form = document.getElementById('profile-form');
       // A deploy landed: the JS this tab is running is no longer the JS the
       // server ships. Data-refresh can't fix that — only a reload can, and
       // waiting for a human to press F5 is how a fix "doesn't work" on a
-      // screen that has been open since before it shipped.
+      // screen that has been open since before it shipped. This check runs
+      // even while the demo loop is on — a floor-model screen spends its
+      // life in the demo, and skipping it there would strand exactly the
+      // screen this exists for.
       if (code !== null && p.code_rev && p.code_rev !== code) { location.reload(); return; }
       if (p.code_rev) code = p.code_rev;
+      // The demo is showing synthetic state; repainting real data or alerts
+      // over it would tear the illusion. Data sync resumes on exit.
+      if (document.body.classList.contains('demo-on')) return;
       // Day rollover: "today" is now a different day, so every today-scoped
       // panel on screen is stale even though no data changed.
       if (day && p.server_date !== day) { day = p.server_date; await refresh(); }
