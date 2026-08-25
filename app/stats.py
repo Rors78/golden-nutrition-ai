@@ -701,6 +701,61 @@ def fuel_plan(data):
     }
 
 
+def recipe_fit(data):
+    """Which saved recipe fits what is left of today, and at how many
+    servings. Deterministic matchmaking between the recipe box and the
+    fuel plan: protein fill is worth more than calorie fill, and calorie
+    overshoot is punished hard — a dish that blows the day's budget ranks
+    below one that merely underfills it.
+    """
+    recipes = data.get('recipes') or []
+    if not recipes:
+        return {'has_data': False, 'note': 'No recipes saved yet — save one from any AI estimate.'}
+    fp = fuel_plan(data)
+    if not fp.get('has_data'):
+        return {'has_data': False, 'note': fp.get('note', 'The fuel plan needs a weigh-in first.')}
+    totals = today_summary(data)['totals']
+    remaining = {
+        'kcal': max(0, fp['today']['kcal'] - (totals.get('calories') or 0)),
+        'protein': max(0, fp['today']['protein'] - (totals.get('protein') or 0)),
+    }
+    if remaining['kcal'] < 150:
+        return {'has_data': False,
+                'note': "Today's budget is already spent — the box reopens tomorrow."}
+
+    ranked = []
+    for i, r in enumerate(recipes):
+        div = r.get('servings') or 1
+        per_kcal = sum(x.get('calories') or 0 for x in r['items']) / div
+        per_prot = sum(x.get('protein') or 0 for x in r['items']) / div
+        if per_kcal <= 0:
+            continue
+        best = None
+        for sv in (0.5, 1, 1.5, 2):
+            kcal, prot = per_kcal * sv, per_prot * sv
+            over = max(0, kcal - remaining['kcal'] * 1.05)
+            score = (min(1, prot / remaining['protein'] if remaining['protein'] else 1) * 60
+                     + min(1, kcal / remaining['kcal']) * 40
+                     - (over / remaining['kcal']) * 120)
+            if best is None or score > best['score']:
+                best = {'servings': sv, 'score': round(score, 1),
+                        'kcal': round(kcal), 'protein': round(prot),
+                        'over': over > 0}
+        if best['over'] and best['servings'] == 0.5:
+            verdict = 'even half a serving overshoots today'
+        elif best['over']:
+            verdict = f"{best['servings']:g} servings runs over — take less"
+        else:
+            pf = round(best['protein'] / remaining['protein'] * 100)                 if remaining['protein'] else 100
+            verdict = (f"{best['servings']:g} serving{'s' if best['servings'] != 1 else ''} "
+                       f"fills {min(pf, 100)}% of remaining protein within your calories")
+        ranked.append({'index': i, 'name': r['name'], **best, 'verdict': verdict})
+    if not ranked:
+        return {'has_data': False, 'note': 'No recipe carries calories — re-save them with macros.'}
+    ranked.sort(key=lambda x: -x['score'])
+    return {'has_data': True, 'remaining': remaining, 'ranked': ranked}
+
+
 def auto_regulation(data):
     """Today's load adjustment, derived from readiness and the ACWR corridor.
 
