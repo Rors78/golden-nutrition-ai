@@ -317,14 +317,58 @@ export async function enterDemo() {
   // real state to restore on exit, and capturing null loses it.
   if (!State) await refresh().catch(() => {});
   const { startDemo } = await import('./sections/demo.js');
-  stopDemo = startDemo();
-  const original = stopDemo;
-  stopDemo = () => { original(); stopDemo = null; };
+  // The demo exits through its own key/click listeners, so it reports its
+  // exit back — otherwise stopDemo goes stale and the loop can run only once.
+  stopDemo = startDemo(() => { stopDemo = null; });
 }
 if (location.hash === '#demo') addEventListener('load', enterDemo);
 addEventListener('hashchange', () => {
   if (location.hash === '#demo') enterDemo();
 });
+
+// ── floor model: the switch that makes this the display unit ────────────
+// Like a TV in a shop: the demo loop starts on its own and comes back after
+// the customer walks away. Interaction exits the demo as always; ~90 s of
+// idle brings it back. Persisted per-browser, so an opted-in screen stays a
+// display unit across reloads without ever touching the data file.
+(function initFloorModel() {
+  const KEY = 'gna-floor-model';
+  const link = document.getElementById('floor-toggle');
+  if (!link) return;
+  const IDLE = 90000, BOOT = 2500;
+  let timer = 0;
+  const on = () => localStorage.getItem(KEY) === '1';
+
+  function label() {
+    link.textContent = `floor model: ${on() ? 'on' : 'off'}`;
+    link.classList.toggle('on', on());
+  }
+  function arm(delay) {
+    clearTimeout(timer);
+    if (!on()) return;
+    timer = setTimeout(() => {
+      // A hidden tab must not start a canvas loop; re-arm and wait.
+      if (document.hidden) { arm(IDLE); return; }
+      if (!document.body.classList.contains('demo-on')) enterDemo();
+    }, delay);
+  }
+  // Any interaction restarts the countdown — including the very key or click
+  // that exits a running demo, which is what makes the loop come back.
+  ['pointerdown', 'keydown'].forEach(ev =>
+    addEventListener(ev, () => arm(IDLE), true));
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) arm(IDLE);
+  });
+  link.addEventListener('click', ev => {
+    ev.preventDefault();
+    localStorage.setItem(KEY, on() ? '0' : '1');
+    label();
+    if (on()) { toast('Floor model on — the demo loops whenever the screen is idle.'); arm(BOOT); }
+    else { toast('Floor model off.'); clearTimeout(timer); }
+  });
+  label();
+  arm(BOOT);
+})();
 
 // ── quick log: one box, reachable from every tab ────────────────────────
 // The analytics are all dormant until data exists, and what kept the file

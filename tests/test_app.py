@@ -1997,7 +1997,30 @@ def test_vessel_never_sends_zero_for_unknown(client):
     assert v["load"]["have"] is False and v["load"]["acr"] is None
     assert v["composition"]["have"] is False and v["composition"]["bf_pct"] is None
     assert v["voyage"]["have"] is False and v["voyage"]["current_lb"] is None
-    assert all(t is None for t in v["body"]["tape_in"].values())
+    # The body block is the one exception: it always ships drawable geometry
+    # (a blank canvas reads as broken, not as a prompt). Its honesty lives in
+    # the ladder, not in nulls — nothing may claim to have been measured.
+    assert v["body"]["fidelity"] == "generic"
+    assert v["body"]["measured_sites"] == []
+    assert v["body"]["height_in"] is None
+
+
+def test_factory_figure_draws_on_a_cold_install(client):
+    """No height, no tape — the figure still ships full drawable geometry.
+
+    The renderer draws nothing without all four torso sites, so a cold
+    install with null tape_in was a blank canvas that looked like a crash.
+    The generic figure is typical proportions at a default height, dimmed
+    and labelled UNMEASURED by the ladder fields asserted elsewhere.
+    """
+    b = client.get("/api/vessel").get_json()["body"]
+    assert b["have"] is True
+    for site in ("neck_in", "chest_in", "waist_in", "hips_in",
+                 "arm_in", "thigh_in"):
+        assert b["tape_in"][site] and b["tape_in"][site] > 0, site
+    # ...but it never claims to be a measurement of anyone
+    assert b["fidelity"] == "generic"
+    assert b["measured_sites"] == [] and b["measured_on"] is None
 
 
 def test_vessel_degradation_ladder(client):

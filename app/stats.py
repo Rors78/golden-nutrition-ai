@@ -1322,6 +1322,11 @@ TYPICAL_BY_HEIGHT = {
     'hips_in': 0.550, 'arm_in': 0.196, 'thigh_in': 0.313,
 }
 
+# Height used for the factory figure when the profile has no height either.
+# The figure it produces is a silhouette, not a claim: fidelity stays
+# 'generic', measured_sites stays empty, and the renderer dims it to 45%.
+GENERIC_HEIGHT_IN = 70
+
 
 def tape_change(data, days=None):
     """Per-site change between two tape sets, in RADIAL millimetres.
@@ -1411,8 +1416,12 @@ def vessel(data):
         tape = {k: round(height * f, 1) for k, f in TYPICAL_BY_HEIGHT.items()}
         measured = []
     else:
+        # Factory figure: no tape, no height. Draw typical proportions at a
+        # default height rather than nothing — an empty frame reads as broken,
+        # and a broken-looking instrument never earns the first measurement.
         confidence = 'unmeasured'
-        tape = {k: None for k in VESSEL_SITES}
+        tape = {k: round(GENERIC_HEIGHT_IN * f, 1)
+                for k, f in TYPICAL_BY_HEIGHT.items()}
         measured = []
 
     age_days = None
@@ -1423,7 +1432,9 @@ def vessel(data):
             age_days = None
 
     body = {
-        'have': bool(latest) or bool(height),
+        # There is always a figure to draw now — the ladder (full/estimated/
+        # generic) says how much of it is real, and have gates nothing visual.
+        'have': True,
         'confidence': confidence,
         'measured_on': latest['date'] if latest else None,
         'age_days': age_days,
