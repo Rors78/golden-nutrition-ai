@@ -203,6 +203,10 @@ export function renderRemedies(root, state) {
   }
 
   searchIn.addEventListener('input', renderList);
+  // The command palette drops a remedy name here on its way over; the list
+  // paints filtered as soon as the KB load calls renderList.
+  const pre = sessionStorage.getItem('gna-prefill-remedies');
+  if (pre) { sessionStorage.removeItem('gna-prefill-remedies'); searchIn.value = pre; }
   root.append(browse);
 
   api('GET', '/remedies').then(res => {

@@ -2429,6 +2429,33 @@ def test_projection_moving_away_projects_but_never_promises(client):
     assert pr["eta"] == {"mid": None, "early": None, "late": None}
 
 
+def test_search_reaches_every_shelf(client):
+    """/api/search: the Apothecary, the supplement KB, the roster, the log."""
+    client.post("/api/meals", json={"name": "Ginger chicken bowl", "protein": 40,
+                                    "calories": 600})
+    client.post("/api/workouts", json={
+        "name": "Push", "duration": 60,
+        "exercises": [{"exercise": "Bench Press", "sets": 3, "reps": 5, "weight": 225}]})
+    r = client.get("/api/search?q=ginseng").get_json()
+    assert r["remedies"] and any("insen" in x["name"].lower() for x in r["remedies"])
+    r = client.get("/api/search?q=creatine").get_json()
+    assert r["supplements"] and r["supplements"][0]["verdict"]
+    r = client.get("/api/search?q=bench").get_json()
+    assert "Bench Press" in r["exercises"]
+    r = client.get("/api/search?q=ginger").get_json()
+    assert "Ginger chicken bowl" in r["meals"]
+    # under two characters the box stays quiet rather than dumping the shelves
+    r = client.get("/api/search?q=g").get_json()
+    assert all(r[k] == [] for k in ("remedies", "supplements", "coaches", "meals", "exercises"))
+
+
+def test_search_finds_coaches_and_selecting_is_an_api_action(client):
+    r = client.get("/api/search?q=strength").get_json()
+    assert r["coaches"], "goal text must be searchable"
+    cid = r["coaches"][0]["id"]
+    assert client.post("/api/coach/select", json={"id": cid}).status_code == 200
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one

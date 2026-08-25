@@ -613,6 +613,124 @@ document.getElementById('restore-input')?.addEventListener('change', async ev =>
   }
 });
 
+// ── command palette: Ctrl+K, one box over the whole machine ─────────────
+// Ten tabs, twenty coaches, ~350 remedies, a graded supplement library —
+// and until now the only way in was clicking. The palette searches all of
+// it: static rows (tabs, actions) filter locally, everything else comes
+// from /api/search. Selecting acts: tabs navigate, coaches are hired,
+// remedies land in the Apothecary's search box, meals land in the quick bar.
+(function initPalette() {
+  let overlay = null, inp = null, list = null, rows = [], hot = 0, seq = 0;
+
+  const staticRows = () => [
+    ...[...document.querySelectorAll('.tabs button')].map(b => ({
+      group: 'go to', label: b.textContent.trim(),
+      run: () => { location.hash = b.dataset.tab; } })),
+    { group: 'do', label: 'Start demo mode', run: () => { location.hash = '#demo'; } },
+    { group: 'do', label: 'Open profile', run: () => document.getElementById('profile-btn')?.click() },
+    { group: 'do', label: 'Focus quick log', run: () => document.getElementById('quick-input')?.focus() },
+    { group: 'do', label: 'Open lift view', run: () => { location.hash = 'workouts'; } },
+  ];
+
+  function close() { overlay?.remove(); overlay = null; }
+
+  function paintRows() {
+    list.innerHTML = '';
+    rows.forEach((r, i) => {
+      const div = el(`<div class="pal-row${i === hot ? ' hot' : ''}">
+        <span class="pal-group">${esc(r.group)}</span>
+        <span class="pal-label">${esc(r.label)}</span>
+        ${r.sub ? `<span class="pal-sub">${esc(r.sub)}</span>` : ''}</div>`);
+      div.addEventListener('pointerdown', ev => { ev.preventDefault(); pick(i); });
+      div.addEventListener('pointermove', () => {
+        if (hot !== i) { hot = i; paintRows(); }
+      });
+      list.append(div);
+    });
+    if (!rows.length) list.append(el('<div class="pal-empty">Nothing matches. The Apothecary, coaches and supplements need two letters.</div>'));
+  }
+
+  function pick(i) {
+    const r = rows[i];
+    if (!r) return;
+    close();
+    r.run();
+  }
+
+  async function query(q) {
+    const mine = ++seq;
+    const ql = q.trim().toLowerCase();
+    rows = staticRows().filter(r => !ql || r.label.toLowerCase().includes(ql));
+    hot = 0;
+    paintRows();
+    if (ql.length < 2) return;
+    try {
+      const res = await api('GET', `/search?q=${encodeURIComponent(ql)}`);
+      if (mine !== seq || !overlay) return;   // a newer keystroke owns the box
+      for (const c of res.coaches) rows.push({
+        group: 'hire coach', label: c.name, sub: c.goal,
+        run: async () => {
+          try { await api('POST', '/coach/select', { id: c.id }); await refresh(); }
+          catch (e) { toast(e.message); }
+          location.hash = 'coach';
+        } });
+      for (const r of res.remedies) rows.push({
+        group: 'apothecary', label: r.name, sub: r.traditions.join(' · '),
+        run: () => {
+          sessionStorage.setItem('gna-prefill-remedies', r.name);
+          if (location.hash === '#remedies') render(); else location.hash = 'remedies';
+        } });
+      for (const k of res.supplements) rows.push({
+        group: 'supplement', label: k.name, sub: k.verdict,
+        run: () => { location.hash = 'supplements'; } });
+      for (const n of res.meals) rows.push({
+        group: 'log again', label: n, sub: 'from your history',
+        run: () => {
+          const qi = document.getElementById('quick-input');
+          qi.value = n; qi.focus();
+        } });
+      for (const n of res.exercises) rows.push({
+        group: 'exercise', label: n, sub: 'in your log',
+        run: () => { location.hash = 'workouts'; } });
+      paintRows();
+    } catch { /* offline — static rows still work */ }
+  }
+
+  function open() {
+    if (overlay) return;
+    overlay = el(`<div class="pal-overlay">
+      <div class="pal-box">
+        <input class="pal-input" type="text" placeholder="Search everything — tabs, coaches, remedies, your log…"
+               autocomplete="off" spellcheck="false">
+        <div class="pal-list"></div>
+        <div class="pal-hint">↑↓ move · Enter select · Esc close</div>
+      </div></div>`);
+    inp = overlay.querySelector('.pal-input');
+    list = overlay.querySelector('.pal-list');
+    overlay.addEventListener('pointerdown', ev => { if (ev.target === overlay) close(); });
+    inp.addEventListener('input', () => query(inp.value));
+    inp.addEventListener('keydown', ev => {
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); hot = Math.min(hot + 1, rows.length - 1); paintRows(); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); hot = Math.max(hot - 1, 0); paintRows(); }
+      else if (ev.key === 'Enter') { ev.preventDefault(); pick(hot); }
+      else if (ev.key === 'Escape') { close(); }
+    });
+    document.body.append(overlay);
+    query('');
+    inp.focus();
+  }
+
+  document.addEventListener('keydown', ev => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') {
+      ev.preventDefault();
+      overlay ? close() : open();
+    }
+  });
+  document.getElementById('palette-link')?.addEventListener('click', ev => {
+    ev.preventDefault(); open();
+  });
+})();
+
 // ── voice logging: hold the coach's ear ─────────────────────────────────
 (function initVoice() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
