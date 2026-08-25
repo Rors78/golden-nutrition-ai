@@ -316,6 +316,50 @@ def _code_rev():
 CODE_REV = _code_rev()
 
 
+@bp.get('/search')
+def global_search():
+    """One box over the whole machine: the Apothecary, the supplement
+    library, the coach roster, and the user's own logged names. Substring
+    match, capped per group — the palette needs speed, not recall."""
+    q = (request.args.get('q') or '').strip().lower()
+    out = {'q': q, 'remedies': [], 'supplements': [], 'coaches': [],
+           'meals': [], 'exercises': []}
+    if len(q) < 2:
+        return jsonify(out)
+    out['remedies'] = [{'name': r['name'], 'traditions': r['traditions'][:2],
+                        'evidence': r['evidence']}
+                       for r in search_kb(q, limit=5)]
+    out['supplements'] = [{'name': k['name'], 'verdict': k['verdict']}
+                          for k in KB
+                          if q in k['name'].lower()
+                          or q in k.get('category', '').lower()][:5]
+    out['coaches'] = [{'id': c['id'], 'name': c['name'], 'goal': c['goal']}
+                      for c in ROSTER
+                      if q in c['name'].lower() or q in c['goal'].lower()
+                      or q in c.get('style', '').lower()][:5]
+    d = store.load()
+    meals, seen = [], set()
+    for m in reversed(d.get('meals', [])):
+        n = (m.get('name') or '').strip()
+        if n and q in n.lower() and n.lower() not in seen:
+            meals.append(n)
+            seen.add(n.lower())
+        if len(meals) >= 5:
+            break
+    out['meals'] = meals
+    exs, seen = [], set()
+    for w in reversed(d.get('workouts', [])):
+        for e in w.get('exercises', []):
+            n = (e.get('exercise') or '').strip()
+            if n and q in n.lower() and n.lower() not in seen:
+                exs.append(n)
+                seen.add(n.lower())
+        if len(exs) >= 5:
+            break
+    out['exercises'] = exs
+    return jsonify(out)
+
+
 @bp.get('/pulse')
 def live_pulse():
     """A cheap 'has anything changed' token, plus what is live right now.
