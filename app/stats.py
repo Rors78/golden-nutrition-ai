@@ -535,6 +535,88 @@ def log_heat(data, days=182):
             'days_logged': logged, 'total_days': days}
 
 
+def week_in_iron(data):
+    """The last seven days, graded against the user's own plans.
+
+    Four columns of 25 points each, every point accounted for:
+      pace     — 7-day weight trend vs the fuel plan's target pace
+      protein  — days at >=90% of the pinned protein target
+      sessions — workouts done vs the planned training days
+      logging  — days with anything logged at all
+    Not a judgement engine: the breakdown ships with the score so the user
+    can argue with any column. Honest silence until a week exists.
+    """
+    heat = log_heat(data, days=14)
+    if not heat.get('has_data'):
+        return {'has_data': False}
+    last7 = heat['days'][-7:]
+    logged_days = sum(1 for c in last7 if c['n'])
+    if not logged_days:
+        return {'has_data': False}
+
+    fp = fuel_plan(data)
+    cutoff7 = (date.today() - timedelta(days=6)).isoformat()
+    cutoff14 = (date.today() - timedelta(days=13)).isoformat()
+
+    # ── pace: this week's average weight vs last week's, against target ──
+    ws = sorted(data.get('weights', []), key=lambda w: w['date'])
+    this_wk = [w['weight'] for w in ws if w['date'] >= cutoff7]
+    prev_wk = [w['weight'] for w in ws
+               if cutoff14 <= w['date'] < cutoff7]
+    pace = None
+    if len(this_wk) >= 2 and len(prev_wk) >= 2:
+        pace = round(sum(this_wk) / len(this_wk)
+                     - sum(prev_wk) / len(prev_wk), 2)
+    target_pace = fp.get('pace_lb_wk', 0) if fp.get('has_data') else 0
+    if pace is None:
+        pace_pts, pace_note = 0, 'needs weigh-ins in both weeks to measure pace'
+    else:
+        miss = abs(pace - target_pace)
+        pace_pts = round(25 * max(0.0, 1 - miss / max(abs(target_pace), 0.75)))
+        pace_note = (f'{pace:+.2f} lb/wk against a {target_pace:+.2f} target'
+                     if target_pace else f'{pace:+.2f} lb/wk at maintenance')
+
+    # ── protein: days at >=90% of the pinned target ──
+    prot_target = fp['today']['protein'] if fp.get('has_data') else         (data['profile'].get('daily_protein_g') or 0)
+    by_day = {}
+    for m in data.get('meals', []):
+        if m.get('date', '') >= cutoff7:
+            by_day[m['date']] = by_day.get(m['date'], 0) + (m.get('protein') or 0)
+    if prot_target:
+        prot_days = sum(1 for v in by_day.values() if v >= prot_target * 0.9)
+        prot_pts = round(25 * prot_days / 7)
+        prot_note = f'{prot_days}/7 days at 90% of {prot_target} g'
+    else:
+        prot_days, prot_pts = 0, 0
+        prot_note = 'no protein target — set one, or forge the fuel plan'
+
+    # ── sessions: done vs planned ──
+    planned = fp.get('training_days_per_week', 3) if fp.get('has_data') else 3
+    done = len({w['date'] for w in data.get('workouts', [])
+                if w.get('date', '') >= cutoff7})
+    sess_pts = round(25 * min(1.0, done / planned)) if planned else 0
+    sess_note = f'{done}/{planned} planned sessions'
+
+    # ── logging ──
+    log_pts = round(25 * logged_days / 7)
+    log_note = f'{logged_days}/7 days with anything logged'
+
+    return {
+        'has_data': True,
+        'score': pace_pts + prot_pts + sess_pts + log_pts,
+        'columns': [
+            {'key': 'pace', 'pts': pace_pts, 'max': 25, 'note': pace_note},
+            {'key': 'protein', 'pts': prot_pts, 'max': 25, 'note': prot_note},
+            {'key': 'sessions', 'pts': sess_pts, 'max': 25, 'note': sess_note},
+            {'key': 'logging', 'pts': log_pts, 'max': 25, 'note': log_note},
+        ],
+        'pace_lb_wk': pace, 'target_pace': target_pace,
+        'protein_days': prot_days if prot_target else None,
+        'sessions_done': done, 'sessions_planned': planned,
+        'logged_days': logged_days,
+    }
+
+
 def fuel_plan(data):
     """Carb-cycled daily targets: training days eat more, rest days carry
     the deficit, the week still lands on the goal pace.

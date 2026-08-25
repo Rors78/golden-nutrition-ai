@@ -369,6 +369,37 @@ export function renderDashboard(root, state) {
     woCard.append(el('<div class="empty">Rest day so far. The plates are waiting in Workouts.</div>'));
   }
 
+  // ── the week in iron: last 7 days, graded against your own plans ──
+  const WI = state.stats.week_in_iron || {};
+  if (WI.has_data) {
+    const R = 34, C = 2 * Math.PI * R;
+    const frac = WI.score / 100;
+    const ringCol = WI.score >= 75 ? 'var(--good)' : WI.score >= 45 ? 'var(--gold)' : 'var(--warn)';
+    const wi = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">The week in iron</p>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 12px">The last seven
+        days against your own plans — every point accounted for, so you can argue
+        with any line of it.</p>
+      <div class="wi-wrap">
+        <svg viewBox="0 0 84 84" class="wi-ring" role="img" aria-label="week score ${WI.score} of 100">
+          <circle cx="42" cy="42" r="${R}" fill="none" stroke="var(--card-2)" stroke-width="7"/>
+          <circle cx="42" cy="42" r="${R}" fill="none" stroke="${ringCol}" stroke-width="7"
+            stroke-linecap="round" stroke-dasharray="${(C * frac).toFixed(1)} ${C.toFixed(1)}"
+            transform="rotate(-90 42 42)"/>
+          <text x="42" y="47" text-anchor="middle" class="wi-score">${WI.score}</text>
+        </svg>
+        <div class="wi-cols">
+          ${WI.columns.map(c2 => `<div class="wi-row">
+            <span class="wi-key">${esc(c2.key)}</span>
+            <div class="wi-bar"><i style="width:${c2.max ? c2.pts / c2.max * 100 : 0}%"></i></div>
+            <span class="wi-pts">${c2.pts}/${c2.max}</span>
+            <span class="wi-note">${esc(c2.note)}</span>
+          </div>`).join('')}
+        </div>
+      </div></div>`);
+    root.append(wi);
+  }
+
   // mint the coach's coin into every slot the dashboard drew
   if (coach) root.querySelectorAll('.medal-slot').forEach(sl => {
     if (!sl.firstChild) sl.append(coachMedallion(coach, 38));
