@@ -1069,3 +1069,32 @@ body.lift-open { overflow: hidden; }
   display: flex; gap: 8px;
 }
 .vessel-modes .vessel-mode { position: static; }
+
+/* -- the program engine ------------------------------------------------- */
+.pg-badge {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em;
+  color: var(--warn); border: 1px solid var(--warn); border-radius: 999px;
+  padding: 2px 9px; margin-left: 8px; vertical-align: 2px;
+}
+.pg-weeks { display: flex; gap: 5px; margin: 10px 0; }
+.pg-weeks i {
+  flex: 1; height: 8px; border-radius: 4px; background: var(--card-2);
+  max-width: 56px;
+}
+.pg-weeks i.dl { background: rgba(240, 146, 95, .28); }
+.pg-weeks i.now { background: var(--gold); box-shadow: 0 0 8px rgba(242, 193, 78, .5); }
+.pg-tms { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 12px; }
+.pg-tm { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+.pg-tm b { color: var(--ink); }
+.pg-tm.est i { font-style: normal; color: var(--warn); }
+.pg-next {
+  border: 1px solid var(--line); border-left: 3px solid var(--gold);
+  border-radius: var(--radius-sm); padding: 12px 16px; font-size: 13px;
+  color: var(--ink-2);
+}
+.pg-next b { color: var(--gold-bright); }
+.pg-lab {
+  display: block; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+  margin-bottom: 6px;
+}
