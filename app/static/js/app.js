@@ -413,6 +413,48 @@ addEventListener('hashchange', () => {
     ev.preventDefault();
     input.focus();
   });
+
+  // ── repeat chips: most of real logging is the same meals again ────────
+  // Focus the box and the recent distinct meals appear as one-tap chips,
+  // macros included. Tapping one re-logs it for today through the ordinary
+  // meals endpoint — no parsing, no AI, no typing the same breakfast twice.
+  const chips = document.getElementById('quick-chips');
+  function recentMeals() {
+    const seen = new Map();
+    for (const m of [...(State?.meals || [])].reverse()) {
+      const key = (m.name || '').trim().toLowerCase();
+      if (key && !seen.has(key)) seen.set(key, m);
+      if (seen.size >= 6) break;
+    }
+    return [...seen.values()];
+  }
+  function paintChips() {
+    const rm = recentMeals();
+    chips.innerHTML = '';
+    if (!rm.length || input.value.trim()) { chips.hidden = true; return; }
+    chips.append(el('<span class="qc-lab">again today:</span>'));
+    for (const m of rm) {
+      const b = el(`<button type="button" class="qc-chip">${esc(m.name)}
+        <i>${Math.round(m.protein || 0)}p · ${Math.round(m.calories || 0)} kcal</i></button>`);
+      b.addEventListener('click', async () => {
+        chips.hidden = true;
+        try {
+          await api('POST', '/meals', {
+            name: m.name, protein: m.protein, calories: m.calories,
+            carbs: m.carbs, fat: m.fat, fiber: m.fiber,
+          });
+          toast(`${m.name} — logged again`);
+          await refresh();
+        } catch (e) { toast(e.message); }
+      });
+      chips.append(b);
+    }
+    chips.hidden = false;
+  }
+  input.addEventListener('focus', paintChips);
+  input.addEventListener('input', paintChips);
+  // Delay so a tap on a chip lands before the panel hides under it.
+  input.addEventListener('blur', () => setTimeout(() => { chips.hidden = true; }, 250));
 })();
 
 document.getElementById('profile-btn').addEventListener('click', () => {
@@ -589,7 +631,9 @@ document.getElementById('restore-input')?.addEventListener('change', async ev =>
       const text = ev.results[0][0].transcript;
       toast(`Heard: "${text}" — logging…`);
       try {
-        const res = await api('POST', '/voice', { text });
+        // Same door as the typed quick bar: regex first (instant, offline),
+        // AI only for prose the patterns cannot shape.
+        const res = await api('POST', '/quick', { text });
         toast(res.message);
         await refresh();
       } catch (e) { toast(e.message); }
