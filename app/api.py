@@ -15,7 +15,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request, Response, send_from_directory
 
-from . import ai, data as store, food_db, importer, notify, program, stats
+from . import ai, data as store, exercise_kb, food_db, importer, notify, program, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
 from .data import MACRO_FIELDS, clean_num
 from .remedies_kb import kb_stats, load_kb, remedy_of_day, search_kb
@@ -323,6 +323,20 @@ def _code_rev():
 
 
 CODE_REV = _code_rev()
+
+
+@bp.get('/exercise/<name>')
+def exercise_guide(name):
+    """Form guide for one movement, matched loosely by name."""
+    g = exercise_kb.lookup(name)
+    if not g:
+        return _err('No guide for that movement yet.', 404)
+    return jsonify(g)
+
+
+@bp.get('/exercises')
+def exercise_catalog():
+    return jsonify({'exercises': exercise_kb.catalog()})
 
 
 @bp.post('/program')

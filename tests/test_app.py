@@ -2669,6 +2669,28 @@ def test_program_cold_install_and_abandon(client):
     assert ps["has_program"] is False
 
 
+def test_exercise_guide_matches_loosely_and_excludes_lookalikes(client):
+    g = client.get("/api/exercise/3x5%20Back%20Squat%20(paused)").get_json()
+    assert g["name"] == "Back Squat" and g["animated"] is True
+    assert g["setup"] and g["cues"] and g["faults"] and g["breath"] and g["safety"]
+    # an RDL must not return the deadlift guide
+    g = client.get("/api/exercise/Romanian%20Deadlift").get_json()
+    assert g["name"] == "Romanian Deadlift"
+    assert client.get("/api/exercise/Underwater%20Basket%20Press").status_code == 404
+
+
+def test_exercise_catalog_covers_the_program(client):
+    cat = client.get("/api/exercises").get_json()["exercises"]
+    names = {x["name"] for x in cat}
+    from app.program import MAIN_LIFTS, ACCESSORY_POOL
+    for lift in MAIN_LIFTS:
+        assert lift in names, f"{lift} must have a form guide"
+    for pool in ACCESSORY_POOL.values():
+        for acc in pool:
+            assert acc in names, f"accessory {acc} must have a form guide"
+    assert sum(1 for x in cat if x["animated"]) >= 5
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one
