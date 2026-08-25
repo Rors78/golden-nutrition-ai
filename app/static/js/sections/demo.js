@@ -94,7 +94,7 @@ const STOPS = [
   ['remedies', 'THE APOTHECARY', '364 remedies from 84 traditions, graded against modern evidence.'],
 ];
 
-export function startDemo() {
+export function startDemo(onExit) {
   const real = State;                      // put this back on exit
   let i = 0, timer = 0, alive = true;
 
@@ -124,6 +124,10 @@ export function startDemo() {
     setState(real);
     if (location.hash === '#demo') location.hash = '#dashboard';
     refresh();
+    // The caller tracks whether a demo is running; without this callback an
+    // exit via our own key/click listeners leaves it holding a dead handle
+    // and the demo can never start a second time in the same page load.
+    if (onExit) onExit();
   }
 
   function advance() {

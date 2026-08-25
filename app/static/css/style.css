@@ -864,3 +864,6 @@ body.lift-open { overflow: hidden; }
 }
 .onboarding .ob-step.done .ob-body b { color: var(--ink-2); text-decoration: line-through; }
 .onboarding .ob-step.done .ob-body small { opacity: .6; }
+
+/* floor model toggle: lit when this screen is a display unit */
+#floor-toggle.on { color: var(--gold); }
