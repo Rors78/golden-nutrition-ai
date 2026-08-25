@@ -488,6 +488,64 @@ def strength_standards(data):
                       'lifts — markers, not judgements.'}
 
 
+def auto_regulation(data):
+    """Today's load adjustment, derived from readiness and the ACWR corridor.
+
+    Both instruments existed separately; this is the joint that makes them
+    actionable: one factor applied to today's top-set targets, with every
+    contributing reason named in plain text. Transparent rules, not a model
+    — the user must be able to argue with it. Stale vitals are refused: a
+    reading from three days ago must never steer today's bar.
+    """
+    rd = readiness(data)
+    if not rd.get('has_data'):
+        return {'has_data': False,
+                'note': "Log this morning's vitals (sleep, HRV or resting HR) "
+                        'to arm auto-regulation.'}
+    # Freshness gate: refuse anything older than yesterday. Newer-than-today
+    # is accepted — a phone in a UTC-ahead timezone dates this morning's row
+    # 'tomorrow' (toISOString is UTC), and fresher than expected is not stale.
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    if (rd.get('date') or '') < yesterday:
+        return {'has_data': False,
+                'note': f"Vitals are from {rd.get('date')} — auto-regulation "
+                        "only trusts this morning's (or yesterday's) numbers."}
+
+    factor, reasons = 1.0, []
+    score = rd['score']
+    if score >= 85:
+        factor += 0.025
+        reasons.append(f'Readiness {score} — primed; the top sets earn a nudge.')
+    elif score >= 60:
+        reasons.append(f'Readiness {score} — train as planned.')
+    elif score >= 40:
+        factor -= 0.05
+        reasons.append(f'Readiness {score} — recovery is lagging; 5% off the top sets.')
+    else:
+        factor -= 0.10
+        reasons.append(f'Readiness {score} — well under your baselines; '
+                       '10% off, or make it a technique day.')
+
+    st = training_strain(data)
+    acwr = st.get('acwr') if st.get('has_data') else None
+    if acwr is not None and acwr > 1.3:
+        factor -= 0.05
+        reasons.append(f'Acute:chronic {acwr} is above the 1.3 corridor — '
+                       'pull another 5% before it pulls you.')
+    elif acwr is not None and acwr < 0.8 and score >= 60:
+        reasons.append(f'Acute:chronic {acwr} is under the corridor — '
+                       'there is room for volume today.')
+
+    factor = round(max(0.85, min(1.05, factor)), 3)
+    return {'has_data': True, 'factor': factor,
+            'pct': round((factor - 1) * 100, 1),
+            'label': ('nudge up' if factor > 1
+                      else 'as planned' if factor == 1 else 'pull back'),
+            'readiness_score': score, 'readiness_level': rd['level'],
+            'acwr': acwr, 'reasons': reasons,
+            'caveat': 'Guidance from your own baselines — never medical advice.'}
+
+
 def progression(data):
     """Per-exercise: sorted [{date, top, volume}] from structured workout logs."""
     out = {}
