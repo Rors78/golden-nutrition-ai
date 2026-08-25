@@ -73,7 +73,10 @@ function slices(tape, breath) {
 
 export function renderVessel(root, state) {
   const wrap = el(`<div class="vessel-wrap">
-    <button type="button" class="vessel-mode" data-f="modeBtn" hidden>Change map</button>
+    <div class="vessel-modes" data-f="modes" hidden>
+      <button type="button" class="vessel-mode" data-mode="change" data-f="modeChange" hidden>Change map</button>
+      <button type="button" class="vessel-mode" data-mode="load" data-f="modeLoad" hidden>Load map</button>
+    </div>
     <canvas class="vessel-canvas"></canvas>
     <div class="vessel-hud">
       <div class="vh vh-tl"><span class="vh-lab">Fuel · today</span>
@@ -98,6 +101,11 @@ export function renderVessel(root, state) {
   </div>`);
   root.append(wrap);
 
+  // Training volume by muscle group, painted on the body in Load-map mode.
+  // Comes with the state the section was rendered from, so the demo's
+  // synthetic split paints exactly like real data would.
+  const MB = state.stats?.muscle_balance || { groups: [] };
+
   const cv = wrap.querySelector('canvas'), cx = cv.getContext('2d');
   const F = {};
   wrap.querySelectorAll('[data-f]').forEach(n => { F[n.dataset.f] = n; });
@@ -105,7 +113,7 @@ export function renderVessel(root, state) {
   let W = 0, H = 0, raf = 0, t0 = performance.now();
   let V = null;                       // the payload; null until first fetch
   let hot = null;                     // ring under the pointer, if any
-  let showChange = false;             // change-map overlay on/off
+  let mode = null;                    // overlay: null | 'change' | 'load'
   let phi = 0.7, phiV = 0;            // orbit angle + fling velocity
   let lastSpin = 0;                   // when the user last grabbed the body
   let dragging = false, dragMoved = false, dragX = 0;
@@ -279,7 +287,7 @@ export function renderVessel(root, state) {
     // ── change map: heat on the sites that actually moved ──
     // Suspended while scrubbing: the heat compares two fixed sets, and a
     // morphing figure underneath it would lie about where the colour sits.
-    if (showChange && V.change?.has_data && !scrubbing) {
+    if (mode === 'change' && V.change?.has_data && !scrubbing) {
       for (const s2 of V.change.sites) {
         if (!s2.significant) continue;
         const site = RING_SITES.find(r => r.key === s2.site);
@@ -296,6 +304,67 @@ export function renderVessel(root, state) {
         cx.ellipse(cxp, py, rp, rp * TILT, 0, 0, TAU);
         cx.strokeStyle = heatColor(s2.delta_mm, 1);
         cx.lineWidth = 2.4; cx.stroke();
+      }
+    }
+
+    // ── load map: where the last 28 days of training volume landed ──
+    // Chest and core paint the front arcs, back paints the rear, shoulders
+    // take the yoke ring, limbs take their own slices. Arcs live in body
+    // space, so they turn with the figure — spin it to see the back.
+    if (mode === 'load' && !scrubbing && MB.groups.length) {
+      const maxPct = Math.max(...MB.groups.map(g => g.pct)) || 1;
+      const nearest = (part, y) => {
+        let best = null, bd = 1e9;
+        for (const [yi, ri] of part) {
+          if (ri && Math.abs(yi - y) < bd) { bd = Math.abs(yi - y); best = [yi, ri]; }
+        }
+        return best;
+      };
+      const arcRing = (ox, r, yi, arc, aStroke) => {
+        const P2 = 30;
+        let path = [];
+        const flush = () => {
+          if (path.length > 1) {
+            for (const [wdt, aK] of [[7, 0.35], [2.2, 1]]) {
+              cx.beginPath();
+              path.forEach(([x2, y2], i) => i ? cx.lineTo(x2, y2) : cx.moveTo(x2, y2));
+              cx.strokeStyle = `rgba(255,150,70,${aStroke * aK})`;
+              cx.lineWidth = wdt; cx.stroke();
+            }
+          }
+          path = [];
+        };
+        for (let k = 0; k <= P2; k += 1) {
+          const th = k / P2 * TAU;
+          const inArc = arc === 'full' || (arc === 'front' ? Math.sin(th) > 0.2
+            : Math.sin(th) < -0.2);
+          if (!inArc) { flush(); continue; }
+          path.push(project(ox, r, th, yi, ppi, cxp));
+        }
+        flush();
+      };
+      const REGIONS = {
+        Chest: { part: 'torso', ys: [14.8, 16.6, 18.4], arc: 'front' },
+        Back: { part: 'torso', ys: [13.6, 16.6, 19.6], arc: 'back' },
+        Core: { part: 'torso', ys: [21.6, 24.2], arc: 'front' },
+        Shoulders: { part: 'torso', ys: [12.4], arc: 'full' },
+        Legs: { part: 'leg', ys: [31, 39, 46, 52], arc: 'full' },
+        Arms: { part: 'arm', ys: [14, 18, 24, 30], arc: 'full' },
+      };
+      for (const g of MB.groups) {
+        const reg = REGIONS[g.group];
+        if (!reg) continue;
+        const k = (0.22 + 0.78 * (g.pct / maxPct)) * 0.6 * alpha;
+        const parts = reg.part === 'torso' ? [[sl.torso, 0]]
+          : reg.part === 'leg'
+            ? [[sl.leg, -sl.hipR * 0.46], [sl.leg, sl.hipR * 0.46]]
+            : [[sl.arm, -sl.shoulderR * 0.98], [sl.arm, sl.shoulderR * 0.98]];
+        for (const [part, ox] of parts) {
+          for (const y of reg.ys) {
+            const hit = nearest(part, y);
+            if (hit) arcRing(ox, hit[1], hit[0], reg.arc, k);
+          }
+        }
       }
     }
 
@@ -383,12 +452,24 @@ export function renderVessel(root, state) {
       F.eta.textContent = 'step on the scale to begin the voyage';
     }
 
-    // ── change map readout ──
+    // ── overlay modes: change map and load map share the readout box ──
     const ch = V.change;
-    F.modeBtn.hidden = !ch?.has_data;
-    F.modeBtn.textContent = showChange ? 'Hide change' : 'Change map';
-    F.modeBtn.classList.toggle('on', showChange);
-    if (showChange && ch?.has_data) {
+    F.modeChange.hidden = !ch?.has_data;
+    F.modeLoad.hidden = !MB.groups.length;
+    F.modes.hidden = F.modeChange.hidden && F.modeLoad.hidden;
+    F.modeChange.classList.toggle('on', mode === 'change');
+    F.modeLoad.classList.toggle('on', mode === 'load');
+    if (mode === 'load' && MB.groups.length) {
+      const top = Math.max(...MB.groups.map(g => g.pct));
+      const rows = MB.groups.map(g => `<span class="cg-row ${g.pct === top ? 'up' : ''}">
+        <i>${esc(g.group.toLowerCase())}</i>
+        ${g.pct}%
+        <small>${(g.volume / 1000).toFixed(1)}k lbs</small></span>`).join('');
+      F.changeBox.innerHTML = `<div class="cg-head">${MB.days}d volume · painted on the body</div>${rows}
+        <div class="cg-note">${MB.warning ? esc(MB.warning)
+          : 'Brighter = more trained · the rear arcs are your back — spin the body to see them'}</div>`;
+      F.changeBox.classList.add('show');
+    } else if (mode === 'change' && ch?.has_data) {
       const rows = ch.sites.filter(s => s.significant)
         .sort((a2, b2) => Math.abs(b2.delta_mm) - Math.abs(a2.delta_mm))
         .map(s => `<span class="cg-row ${s.direction}">
@@ -540,7 +621,11 @@ export function renderVessel(root, state) {
     paintLab();
   }
 
-  F.modeBtn.addEventListener('click' , () => { showChange = !showChange; });
+  F.modes.addEventListener('click', ev => {
+    const b = ev.target.closest('button');
+    if (!b) return;
+    mode = mode === b.dataset.mode ? null : b.dataset.mode;
+  });
 
   // Demo mode injects a payload on State rather than writing to the server,
   // so honour it when present instead of fetching over the top of it.

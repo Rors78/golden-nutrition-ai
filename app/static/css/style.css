@@ -1062,3 +1062,10 @@ body.lift-open { overflow: hidden; }
   border-radius: 50%; margin-top: -5.5px; background: var(--gold);
   box-shadow: 0 0 8px rgba(242, 193, 78, .6); cursor: ew-resize;
 }
+
+/* -- vessel mode switcher ----------------------------------------------- */
+.vessel-modes {
+  position: absolute; top: 14px; left: 14px; z-index: 5;
+  display: flex; gap: 8px;
+}
+.vessel-modes .vessel-mode { position: static; }
