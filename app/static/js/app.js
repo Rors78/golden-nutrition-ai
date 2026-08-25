@@ -804,4 +804,6 @@ export function plateDisc(text, { size = 44, tier = 'gold' } = {}) {
   return d;
 }
 
+import('./sections/coach-dock.js').then(m => m.initCoachDock()).catch(() => {});
+
 refresh().catch(e => { view.innerHTML = ''; view.append(el(`<div class="empty">Failed to load: ${esc(e.message)}</div>`)); });
