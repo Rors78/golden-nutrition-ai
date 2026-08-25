@@ -2493,6 +2493,64 @@ def test_strength_standards_honest_silences(client):
     assert all(l["lift"] != "Barbell Curl" for l in ss["lifts"])
 
 
+def _seed_vitals_baseline(client, days=10, sleep=7.5, hrv=60, rhr=55):
+    from datetime import date, timedelta
+    for i in range(days):
+        client.post("/api/vitals", json={
+            "date": (date.today() - timedelta(days=days - i)).isoformat(),
+            "sleep_h": sleep, "hrv_ms": hrv, "resting_hr": rhr})
+
+
+def test_auto_regulation_pulls_back_on_a_rough_morning(client):
+    from datetime import date
+    _seed_vitals_baseline(client)
+    client.post("/api/vitals", json={"date": date.today().isoformat(),
+                                     "sleep_h": 3.5, "hrv_ms": 30, "resting_hr": 75})
+    ar = client.get("/api/state").get_json()["stats"]["auto_regulation"]
+    assert ar["has_data"] is True
+    assert ar["factor"] < 1 and ar["label"] == "pull back"
+    assert any("Readiness" in r for r in ar["reasons"])
+    assert "never medical advice" in ar["caveat"]
+
+
+def test_auto_regulation_nudges_up_when_primed(client):
+    from datetime import date
+    _seed_vitals_baseline(client)
+    client.post("/api/vitals", json={"date": date.today().isoformat(),
+                                     "sleep_h": 8.5, "hrv_ms": 70, "resting_hr": 50})
+    ar = client.get("/api/state").get_json()["stats"]["auto_regulation"]
+    assert ar["factor"] > 1 and ar["label"] == "nudge up"
+
+
+def test_auto_regulation_refuses_stale_vitals(client):
+    """A reading from three days ago must never steer today's bar."""
+    from datetime import date, timedelta
+    for back in range(10, 2, -1):      # newest row is 3 days old
+        client.post("/api/vitals", json={
+            "date": (date.today() - timedelta(days=back)).isoformat(),
+            "sleep_h": 7.5, "hrv_ms": 60, "resting_hr": 55})
+    ar = client.get("/api/state").get_json()["stats"]["auto_regulation"]
+    assert ar["has_data"] is False
+    assert (date.today() - timedelta(days=3)).isoformat() in ar["note"]
+
+
+def test_auto_regulation_accepts_a_utc_tomorrow_row(client):
+    """A phone ahead of the server's timezone dates this morning's vitals
+    'tomorrow' (toISOString is UTC). Fresher than expected is not stale."""
+    from datetime import date, timedelta
+    _seed_vitals_baseline(client)
+    client.post("/api/vitals", json={
+        "date": (date.today() + timedelta(days=1)).isoformat(),
+        "sleep_h": 3.5, "hrv_ms": 30, "resting_hr": 75})
+    ar = client.get("/api/state").get_json()["stats"]["auto_regulation"]
+    assert ar["has_data"] is True and ar["factor"] < 1
+
+
+def test_auto_regulation_silent_without_vitals(client):
+    ar = client.get("/api/state").get_json()["stats"]["auto_regulation"]
+    assert ar["has_data"] is False and "vitals" in ar["note"].lower()
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one

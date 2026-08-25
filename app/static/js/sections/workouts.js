@@ -88,6 +88,21 @@ export function renderWorkouts(root, state) {
   };
   const targets = state.stats.next_targets || [];
   const targetOf = name => targets.find(t => t.exercise === String(name || '').trim());
+  // ── auto-regulation: readiness and strain, joined into today's bar ──
+  const ar = state.stats.auto_regulation || {};
+  if (ar.has_data) {
+    const arCard = el(`<div class="ar-card ${ar.factor < 1 ? 'pull' : ar.factor > 1 ? 'push' : ''}">
+      <div class="ar-head"><span class="ar-tag">Auto-regulation</span>
+        <b>today ×${ar.factor}</b><span class="ar-label">${esc(ar.label)}</span></div>
+      <ul class="ar-reasons">${ar.reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul>
+      <div class="ar-caveat">${esc(ar.caveat)}</div></div>`);
+    root.append(arCard);
+  }
+  // Applied when a session starts: targets scale by the factor, rounded to
+  // the nearest 5. Suggestions, not commands — every weight stays editable.
+  const arAdjust = w => (ar.has_data && ar.factor !== 1 && w > 0)
+    ? Math.max(5, Math.round(w * ar.factor / 5) * 5) : w;
+
   const liveWrap = el('<div class="live-wrap"></div>');
   root.append(liveWrap);
 
@@ -96,7 +111,7 @@ export function renderWorkouts(root, state) {
       name, startedAt: Date.now(), rest: 90, restEndsAt: null,
       exercises: exList.map(x => ({
         name: x.exercise, targetSets: x.sets || 0, targetReps: x.reps || 0,
-        targetWeight: x.weight || 0, sets: [],
+        targetWeight: arAdjust(x.weight || 0), sets: [],
       })),
     });
     drawLive();
