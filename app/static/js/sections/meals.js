@@ -451,16 +451,32 @@ export function renderMeals(root, state) {
     const rCard = el(`<div class="card" style="margin-top:14px">
       <p class="chart-title">Recipe box</p>
       <p style="color:var(--muted);font-size:12px;margin:4px 0 0">Cook once, log forever. Save a dish from any AI estimate; log servings of it here.</p>
+      <p class="rc-remaining" style="display:none;font-family:var(--font-mono);font-size:12px;color:var(--steel);margin:8px 0 0"></p>
       <div class="rc-list" style="display:grid;gap:8px;margin-top:10px"></div></div>`);
     const list = rCard.querySelector('.rc-list');
-    recipes.forEach((r, i) => {
+    // The fit engine: rank the box against what is left of today, put the
+    // best fit first with its suggested servings pre-filled.
+    const RF = state.stats.recipe_fit || {};
+    const fitByIdx = {};
+    let order = recipes.map((_, i) => i);
+    if (RF.has_data) {
+      RF.ranked.forEach((f, rank) => { fitByIdx[f.index] = { ...f, rank }; });
+      order = RF.ranked.map(f => f.index)
+        .concat(order.filter(i => !(i in fitByIdx)));
+      const rem = rCard.querySelector('.rc-remaining');
+      rem.style.display = 'block';
+      rem.textContent = `Remaining today: ${RF.remaining.kcal.toLocaleString()} kcal · ${RF.remaining.protein} g protein`;
+    }
+    order.forEach(i => { const r = recipes[i];
       const per = f => Math.round(r.items.reduce((s, x) => s + (x[f] || 0), 0) / (r.servings || 1) * 10) / 10;
-      const row = el(`<div class="deal">
-        <div class="deal-top"><span class="deal-item">${esc(r.name)}</span>
+      const fit = fitByIdx[i];
+      const row = el(`<div class="deal${fit?.rank === 0 && !fit.over ? ' rc-top' : ''}">
+        <div class="deal-top"><span class="deal-item">${esc(r.name)}
+          ${fit?.rank === 0 && !fit.over ? '<span class="rc-fit">FITS TONIGHT</span>' : ''}</span>
           <span style="font-family:var(--font-mono);font-size:12px;color:var(--gold-bright);white-space:nowrap">${per('protein')}g P · ${per('calories')} cal / serving</span></div>
-        <div class="deal-meta">${esc(r.items.map(x => x.name).join(', '))} · makes ${r.servings}</div>
+        <div class="deal-meta">${esc(r.items.map(x => x.name).join(', '))} · makes ${r.servings}${fit ? ` · <span style="color:${fit.over ? 'var(--warn)' : 'var(--good)'}">${esc(fit.verdict)}</span>` : ''}</div>
         <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-          <label style="flex:0 1 110px;font-size:12px">Servings <input type="number" step="0.5" min="0.5" value="1"></label>
+          <label style="flex:0 1 110px;font-size:12px">Servings <input type="number" step="0.5" min="0.5" value="${fit && !fit.over ? fit.servings : 1}"></label>
           <button class="ghost-btn rc-log" type="button" style="min-height:34px;padding:6px 14px;font-size:12px">Log it</button>
           <button class="icon-btn danger rc-del" type="button" title="Delete recipe" style="margin-left:auto">✕</button>
         </div></div>`);

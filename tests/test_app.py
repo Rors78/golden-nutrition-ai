@@ -2766,6 +2766,38 @@ def test_week_in_iron_honest_notes_and_silence(client):
     assert "200 g" in by["protein"]["note"] and by["protein"]["pts"] == 0
 
 
+def test_recipe_fit_ranks_the_box_against_the_remaining_day(client):
+    client.post("/api/weights", json={"weight": 200})
+    client.post("/api/meals", json={"name": "Big lunch", "protein": 80, "calories": 1400})
+    client.post("/api/recipes", json={"name": "Salmon & quinoa", "servings": 2, "items": [
+        {"name": "salmon", "protein": 80, "calories": 700},
+        {"name": "quinoa", "protein": 16, "calories": 440}]})
+    client.post("/api/recipes", json={"name": "Feast lasagna", "servings": 1, "items": [
+        {"name": "lasagna", "protein": 60, "calories": 3600}]})
+    rf = client.get("/api/state").get_json()["stats"]["recipe_fit"]
+    assert rf["has_data"] is True
+    assert rf["ranked"][0]["name"] == "Salmon & quinoa", "the fitting dish outranks the budget-buster"
+    top = rf["ranked"][0]
+    assert top["over"] is False and "protein" in top["verdict"]
+    feast = next(x for x in rf["ranked"] if x["name"] == "Feast lasagna")
+    # 3600 kcal in one serving: even half overshoots the ~1600 left
+    assert feast["over"] is True and "overshoot" in feast["verdict"]
+
+
+def test_recipe_fit_honest_silences(client):
+    rf = client.get("/api/state").get_json()["stats"]["recipe_fit"]
+    assert rf["has_data"] is False and "recipes" in rf["note"].lower()
+    client.post("/api/recipes", json={"name": "Shake", "servings": 1, "items": [
+        {"name": "whey", "protein": 30, "calories": 180}]})
+    rf = client.get("/api/state").get_json()["stats"]["recipe_fit"]
+    assert rf["has_data"] is False and "weigh-in" in rf["note"]
+    # a spent day closes the box rather than recommending an overshoot
+    client.post("/api/weights", json={"weight": 200})
+    client.post("/api/meals", json={"name": "Everything", "protein": 200, "calories": 3200})
+    rf = client.get("/api/state").get_json()["stats"]["recipe_fit"]
+    assert rf["has_data"] is False and "tomorrow" in rf["note"]
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one
