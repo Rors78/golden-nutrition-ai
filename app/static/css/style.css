@@ -1225,3 +1225,99 @@ body.lift-open { overflow: hidden; }
   color: var(--gold); border: 1px solid var(--gold-dim); border-radius: 999px;
   padding: 2px 8px; margin-left: 8px; vertical-align: 2px;
 }
+
+/* -- the corner man: floating coach dock -------------------------------- */
+#coach-dock {
+  position: fixed; right: 18px; bottom: 18px; z-index: 240;
+  width: 56px; height: 56px; border-radius: 50%; padding: 0;
+  background: var(--card); border: 1px solid var(--gold-dim);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .55), 0 0 12px rgba(242, 193, 78, .18);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+#coach-dock:hover { transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .6), 0 0 18px rgba(242, 193, 78, .35); }
+#coach-dock.open { border-color: var(--gold); }
+body.demo-on #coach-dock, body.demo-on #coach-drawer { display: none; }
+
+#coach-drawer {
+  position: fixed; right: 18px; bottom: 84px; z-index: 240;
+  width: min(380px, calc(100vw - 36px)); max-height: min(560px, 74vh);
+  display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .65);
+  animation: cd-in .22s ease;
+}
+#coach-drawer[hidden] { display: none; }
+@keyframes cd-in { from { opacity: 0; transform: translateY(10px); } }
+@media (prefers-reduced-motion: reduce) { #coach-drawer { animation: none; } }
+
+.cd-head {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.cd-who b { display: block; font-size: 14px; }
+.cd-who span {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--gold);
+}
+.cd-voice, .cd-close {
+  background: none; border: 0; cursor: pointer; font-size: 14px;
+  color: var(--muted); padding: 4px 6px;
+}
+.cd-voice { margin-left: auto; filter: grayscale(1); opacity: .55; }
+.cd-voice.on { filter: none; opacity: 1; }
+.cd-close:hover { color: var(--ink); }
+.cd-log { flex: 1; overflow-y: auto; padding: 12px 14px; display: grid; gap: 8px; }
+.cd-msg { max-width: 88%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
+.cd-msg.coach { background: var(--card-2); color: var(--ink-2); border-bottom-left-radius: 4px; }
+.cd-msg.user {
+  background: rgba(242, 193, 78, .12); color: var(--ink);
+  justify-self: end; border-bottom-right-radius: 4px;
+}
+.cd-ts {
+  display: block; margin-top: 4px; font-family: var(--font-mono);
+  font-size: 9px; color: var(--muted); letter-spacing: .08em;
+}
+.cd-typing { display: flex; gap: 4px; padding: 12px 14px; }
+.cd-typing i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--muted);
+  animation: cd-dot 1s infinite;
+}
+.cd-typing i:nth-child(2) { animation-delay: .15s; }
+.cd-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes cd-dot { 0%, 60%, 100% { opacity: .3; } 30% { opacity: 1; transform: translateY(-2px); } }
+.cd-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px; }
+.cd-chip {
+  border: 1px solid var(--line); border-radius: 999px; background: none;
+  color: var(--ink-2); font-size: 11px; padding: 5px 11px; cursor: pointer;
+}
+.cd-chip:hover { border-color: var(--gold-dim); color: var(--gold-bright); }
+.cd-form { display: flex; gap: 8px; padding: 10px 14px 14px; }
+.cd-form input {
+  flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; color: var(--ink); font-size: 13px; padding: 9px 12px;
+}
+.cd-form button { padding: 6px 14px; min-height: 0; }
+.cd-action {
+  display: flex; gap: 8px; align-items: center; padding: 8px 12px;
+  border: 1px solid var(--gold-dim); border-radius: 10px; font-size: 12px;
+}
+.cd-action span { flex: 1; text-transform: capitalize; color: var(--ink-2); }
+.cd-action button { padding: 4px 10px; min-height: 0; font-size: 11px; }
+.cda-ok { color: var(--good); font-size: 12px; }
+
+/* medallion micro-interactions: coins tilt and glint under the pointer */
+.coach-card { perspective: 500px; }
+.coach-card .coach-medal { transition: transform .25s ease; }
+.coach-card:hover .coach-medal { transform: rotateY(18deg) rotateX(-8deg) scale(1.12); }
+.coach-card.selected .coach-medal { animation: medal-glint 3.2s ease-in-out infinite; }
+@keyframes medal-glint {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.35) drop-shadow(0 0 6px rgba(242, 193, 78, .6)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .coach-card:hover .coach-medal { transform: none; }
+  .coach-card.selected .coach-medal { animation: none; }
+}
