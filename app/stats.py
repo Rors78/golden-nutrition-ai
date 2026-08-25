@@ -488,6 +488,53 @@ def strength_standards(data):
                       'lifts — markers, not judgements.'}
 
 
+def log_heat(data, days=182):
+    """The consistency map: one cell per day, lit by how many KINDS of
+    things were logged — meals, a workout, a weigh-in, vitals, tape. Kinds,
+    not entries: five meals in a day is one kind of discipline, not five.
+
+    Streaks count any-logging days; today being empty so far does not break
+    a streak (the day is not over), but it does not extend one either.
+    """
+    kinds = {
+        'meals': set(), 'workouts': set(), 'weights': set(),
+        'vitals': set(), 'measurements': set(),
+    }
+    for key, dates in kinds.items():
+        for row in data.get(key, []):
+            if row.get('date'):
+                dates.add(row['date'])
+
+    today = date.today()
+    start = today - timedelta(days=days - 1)
+    cells = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).isoformat()
+        n = sum(1 for dates in kinds.values() if d in dates)
+        cells.append({'date': d, 'n': min(n, 4)})
+
+    logged = sum(1 for c in cells if c['n'])
+    if not logged:
+        return {'has_data': False}
+
+    # current streak: walk back from today; an empty today is skipped, not fatal
+    cur = 0
+    idx = days - 1
+    if cells[idx]['n'] == 0:
+        idx -= 1
+    while idx >= 0 and cells[idx]['n'] > 0:
+        cur += 1
+        idx -= 1
+    longest = run = 0
+    for c in cells:
+        run = run + 1 if c['n'] else 0
+        longest = max(longest, run)
+
+    return {'has_data': True, 'start': cells[0]['date'], 'days': cells,
+            'current_streak': cur, 'longest_streak': longest,
+            'days_logged': logged, 'total_days': days}
+
+
 def auto_regulation(data):
     """Today's load adjustment, derived from readiness and the ACWR corridor.
 

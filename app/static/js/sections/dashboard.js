@@ -218,6 +218,32 @@ export function renderDashboard(root, state) {
   }
   root.append(grid);
 
+  // ── the consistency map: six months of showing up, one cell per day ──
+  const heat = state.stats.log_heat || {};
+  if (heat.has_data) {
+    const hm = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">The consistency map</p>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">Each cell is
+        a day; it burns brighter for every kind of thing logged — meals, a lift,
+        the scale, vitals, the tape. Kinds, not counts: showing up is the metric.</p>
+      <div class="heat-wrap"><div class="heat-grid"></div></div>
+      <div class="heat-foot">
+        <span><b>${heat.current_streak}</b> day streak</span>
+        <span><b>${heat.longest_streak}</b> longest</span>
+        <span><b>${heat.days_logged}</b> of ${heat.total_days} days logged</span>
+        <span class="heat-scale">less <i class="h0"></i><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i> more</span>
+      </div></div>`);
+    const gridEl = hm.querySelector('.heat-grid');
+    // Column per week, row per weekday — pad the front so columns align.
+    const pad = (new Date(heat.start + 'T00:00').getDay() + 6) % 7;   // Monday-first
+    for (let i = 0; i < pad; i += 1) gridEl.append(el('<i class="hpad"></i>'));
+    for (const c of heat.days) {
+      const cell = el(`<i class="h${c.n}" title="${esc(c.date)} · ${c.n} kind${c.n === 1 ? '' : 's'}"></i>`);
+      gridEl.append(cell);
+    }
+    root.append(hm);
+  }
+
   // Today's plan (from the coach-generated week) + coach strip
   const coach = (state.coaches || []).find(c => c.id === state.coach);
   const week = state.plan?.plan?.week || [];
