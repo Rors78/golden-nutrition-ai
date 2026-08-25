@@ -26,6 +26,7 @@ DEFAULT_DATA = {
     'measurements': [],
     'photos': [],
     'recipes': [],
+    'program': None,
     'shopping_list': [],
     'watches': [],
     'remedy_cabinet': [],

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request, Response, send_from_directory
 
-from . import ai, data as store, food_db, importer, notify, stats
+from . import ai, data as store, food_db, importer, notify, program, stats
 from .coaches import DEFAULT_COACH, ROSTER, get_coach, persona_prompt
 from .data import MACRO_FIELDS, clean_num
 from .remedies_kb import kb_stats, load_kb, remedy_of_day, search_kb
@@ -99,6 +99,7 @@ def get_state():
         'vitals': sorted(d.get('vitals', []), key=lambda v: v['date']),
         'measurements': sorted(d.get('measurements', []), key=lambda m: m['date']),
         'photos': d.get('photos', []),
+        'program': d.get('program'),
         'recipes': d.get('recipes', []),
         'settings': d['settings'],
         'briefing': d.get('briefing'),
@@ -129,6 +130,7 @@ def get_state():
             'progression': stats.progression(d),
             'strength_standards': stats.strength_standards(d),
             'auto_regulation': stats.auto_regulation(d),
+            'program_status': program.status(d),
             'log_heat': stats.log_heat(d),
             'quick_meals': stats.quick_meals(d),
             'nutrition': stats.nutrition_trend(d),
@@ -281,6 +283,7 @@ def vessel_preview():
             'progression': stats.progression(d),
             'strength_standards': stats.strength_standards(d),
             'auto_regulation': stats.auto_regulation(d),
+            'program_status': program.status(d),
             'log_heat': stats.log_heat(d),
             'quick_meals': stats.quick_meals(d),
             'nutrition': stats.nutrition_trend(d),
@@ -320,6 +323,27 @@ def _code_rev():
 
 
 CODE_REV = _code_rev()
+
+
+@bp.post('/program')
+def program_generate():
+    """Forge the 8-week block from the file as it stands. Regenerating
+    replaces the block — training maxes are re-derived, so a block built on
+    estimates trues itself up once the lifts are logged."""
+    body = request.get_json(force=True, silent=True) or {}
+    days = body.get('days', 4)
+    d = store.load()
+    d['program'] = program.generate(d, days=days)
+    store.save(d)
+    return jsonify({'ok': True, 'program': d['program']})
+
+
+@bp.delete('/program')
+def program_delete():
+    d = store.load()
+    d['program'] = None
+    store.save(d)
+    return jsonify({'ok': True})
 
 
 @bp.get('/search')

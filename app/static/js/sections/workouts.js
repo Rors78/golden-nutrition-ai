@@ -103,6 +103,79 @@ export function renderWorkouts(root, state) {
   const arAdjust = w => (ar.has_data && ar.factor !== 1 && w > 0)
     ? Math.max(5, Math.round(w * ar.factor / 5) * 5) : w;
 
+  // ── the program: the app writes the block, the log executes it ────────
+  const PS = state.stats.program_status || {};
+  const prog = state.program;
+  const progCard = el('<div class="card" style="margin-bottom:14px"></div>');
+  if (!PS.has_program) {
+    progCard.append(el(`<div>
+      <p class="chart-title">The program</p>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">An 8-week
+        wave block (the 5/3/1 family), forged from your own lifts: training
+        maxes from your 90-day e1RMs, accessories aimed at your least-trained
+        muscle groups, a deload every fourth week, and the maxes bump at week
+        five. No AI — arithmetic you can audit. Auto-regulation still scales
+        each day's targets when you start a session.</p>
+      <div class="form-row">
+        <label style="flex:0 1 160px">Days per week
+          <select class="pg-days"><option value="4">4</option><option value="3">3</option></select></label>
+        <button type="button" class="gold-btn pg-forge" style="flex:0 1 auto">Forge the block</button>
+      </div></div>`));
+    progCard.querySelector('.pg-forge').addEventListener('click', async () => {
+      try {
+        await api('POST', '/program', { days: Number(progCard.querySelector('.pg-days').value) });
+        toast('Block forged — week 1 starts now');
+        await refresh();
+      } catch (e) { toast(e.message); }
+    });
+  } else {
+    const n = PS.next_session;
+    const tmRow = Object.entries(prog.tms).map(([l, t]) =>
+      `<span class="pg-tm${t.estimated ? ' est' : ''}" title="${esc(t.source)}">
+        ${esc(l.split(' ')[0])} <b>${t.tm}</b>${t.estimated ? '<i>~</i>' : ''}</span>`).join('');
+    const setsTxt = n.sets.map(s2 =>
+      `${s2.weight}×${s2.reps}${s2.amrap ? '+' : ''}`).join(' · ');
+    progCard.append(el(`<div>
+      <p class="chart-title">The program · week ${PS.week} of 8
+        ${PS.deload ? `<span class="pg-badge">${PS.test ? 'TEST WEEK' : 'DELOAD'}</span>` : ''}</p>
+      <div class="pg-weeks">${prog.weeks.map(w2 =>
+        `<i class="${w2.week === PS.week ? 'now' : ''}${w2.deload ? ' dl' : ''}"
+           title="week ${w2.week}${w2.deload ? ' — deload' : ''}"></i>`).join('')}</div>
+      <div class="pg-tms">${tmRow}</div>
+      <div class="pg-next">
+        <span class="pg-lab">Next session · ${PS.done_this_week}/${PS.sessions_this_week} done this week</span>
+        <b>${esc(n.lift)}</b> — ${setsTxt}, then ${n.supplemental.sets}×${n.supplemental.reps}
+        @ ${n.supplemental.weight} · ${n.accessories.map(esc).join(' + ')}
+      </div>
+      <div class="form-row" style="margin-top:10px">
+        <button type="button" class="gold-btn pg-start" style="flex:0 1 auto">Start this session</button>
+        <button type="button" class="ghost-btn pg-drop" style="flex:0 1 auto">Abandon block</button>
+      </div>
+      ${PS.finished ? '<div class="callout good" style="margin-top:10px">Block complete — regenerate to forge the next one from your new maxes.</div>' : ''}
+    </div>`));
+    progCard.querySelector('.pg-start').addEventListener('click', () => {
+      const top = n.sets[n.sets.length - 1];
+      startSession(`${n.lift} day · wk${PS.week}`, [
+        { exercise: n.lift, sets: n.sets.length, reps: top.reps, weight: top.weight },
+        { exercise: n.supplemental.exercise + ' (supplemental)',
+          sets: n.supplemental.sets, reps: n.supplemental.reps, weight: n.supplemental.weight },
+        ...n.accessories.map(a2 => ({ exercise: a2, sets: 3, reps: 10, weight: 0 })),
+      ]);
+      toast(`${n.lift}: work up ${setsTxt}${PS.deload ? ' — deload, leave in the tank' : ''}`);
+    });
+    progCard.querySelector('.pg-drop').addEventListener('click', async ev => {
+      const b = ev.target;
+      if (!b.dataset.armed) {
+        b.dataset.armed = '1'; b.textContent = 'Abandon — sure?';
+        setTimeout(() => { delete b.dataset.armed; b.textContent = 'Abandon block'; }, 3000);
+        return;
+      }
+      try { await api('DELETE', '/program'); toast('Block abandoned'); await refresh(); }
+      catch (e) { toast(e.message); }
+    });
+  }
+  root.append(progCard);
+
   const liveWrap = el('<div class="live-wrap"></div>');
   root.append(liveWrap);
 

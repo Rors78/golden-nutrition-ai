@@ -2615,6 +2615,60 @@ def test_vessel_history_caps_and_cold_install(client):
     assert len(h) == 24
 
 
+def test_program_forges_from_logged_lifts(client):
+    client.post("/api/profile", json={"sex": "male", "weight": 200})
+    client.post("/api/weights", json={"weight": 200})
+    client.post("/api/workouts", json={"name": "Heavy", "duration": 60, "exercises": [
+        {"exercise": "Back Squat", "sets": 3, "reps": 5, "weight": 315},
+        {"exercise": "Bench Press", "sets": 3, "reps": 5, "weight": 225}]})
+    r = client.post("/api/program", json={"days": 4}).get_json()
+    pr = r["program"]
+    # TM = 90% of e1RM (squat 315x5 -> 367 -> 330), logged lifts not estimated
+    assert pr["tms"]["Back Squat"]["tm"] == 330
+    assert pr["tms"]["Back Squat"]["estimated"] is False
+    assert pr["tms"]["Deadlift"]["estimated"] is True, "unlogged lift estimates from bodyweight"
+    wk1 = pr["weeks"][0]["sessions"]
+    squat = next(s2 for s2 in wk1 if s2["lift"] == "Back Squat")
+    assert squat["sets"][-1] == {"pct": 85, "reps": 5, "amrap": True, "weight": 280}
+    # deload week 4 is lighter than week 3's top single
+    wk3_top = next(s2 for s2 in pr["weeks"][2]["sessions"] if s2["lift"] == "Back Squat")["sets"][-1]
+    wk4_top = next(s2 for s2 in pr["weeks"][3]["sessions"] if s2["lift"] == "Back Squat")["sets"][-1]
+    assert pr["weeks"][3]["deload"] is True and wk4_top["weight"] < wk3_top["weight"]
+    # TM bump at week 5: heavier than the same wave in week 1
+    wk5 = next(s2 for s2 in pr["weeks"][4]["sessions"] if s2["lift"] == "Back Squat")
+    assert wk5["sets"][-1]["weight"] > squat["sets"][-1]["weight"]
+    # the block is in the state payload and the status is computed
+    st = client.get("/api/state").get_json()
+    assert st["program"]["method"] == "wave-531"
+    ps = st["stats"]["program_status"]
+    assert ps["has_program"] is True and ps["week"] == 1
+    assert ps["next_session"]["lift"] in ("Overhead Press", "Deadlift", "Bench Press", "Back Squat")
+
+
+def test_program_accessories_aim_at_the_weak_groups(client):
+    """A chest-only log gets pulled toward everything it neglects."""
+    client.post("/api/weights", json={"weight": 200})
+    client.post("/api/workouts", json={"name": "Push", "duration": 45, "exercises": [
+        {"exercise": "Bench Press", "sets": 5, "reps": 5, "weight": 200}]})
+    pr = client.post("/api/program", json={"days": 4}).get_json()["program"]
+    assert "Chest" not in pr["weak_groups"]
+    accs = {a for s2 in pr["weeks"][0]["sessions"] for a in s2["accessories"]}
+    assert not accs & {"Incline Dumbbell Press", "Dips"}, \
+        "the trained group must not get the accessory slots"
+
+
+def test_program_cold_install_and_abandon(client):
+    """No lifts at all: every TM estimated, the block still forges; delete
+    clears it and the status goes silent."""
+    pr = client.post("/api/program", json={"days": 3}).get_json()["program"]
+    assert all(t["estimated"] for t in pr["tms"].values())
+    assert len(pr["weeks"]) == 8
+    assert len(pr["weeks"][0]["sessions"]) == 3
+    assert client.delete("/api/program").status_code == 200
+    ps = client.get("/api/state").get_json()["stats"]["program_status"]
+    assert ps["has_program"] is False
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one
