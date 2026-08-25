@@ -109,7 +109,15 @@ export function renderWeight(root, state) {
       style="margin-top:14px">${esc(w.pace.text)}</div>`));
   }
 
-  if (w.eta) {
+  const proj = w.projection;
+  if (proj?.has_data && proj.eta?.mid) {
+    const win = proj.eta.early && proj.eta.late
+      ? ` · likely between <strong>${esc(proj.eta.early)}</strong> and <strong>${esc(proj.eta.late)}</strong>`
+      : '';
+    root.append(el(`<div class="callout good" style="margin-top:14px">On the fitted trend
+      (${proj.rate_per_week > 0 ? '+' : ''}${proj.rate_per_week} lbs/week over ${proj.n} weigh-ins)
+      you reach <strong>${esc(w.goal)} lbs around ${esc(proj.eta.mid)}</strong>${win}.</div>`));
+  } else if (w.eta) {
     root.append(el(`<div class="callout good" style="margin-top:14px">At ${w.rate_per_week > 0 ? '+' : ''}${w.rate_per_week} lbs/week
       you'll reach <strong>${esc(w.goal)} lbs around ${esc(w.eta)}</strong> (${esc(w.eta_days)} days).</div>`));
   } else if (w.off_track) {
@@ -122,7 +130,7 @@ export function renderWeight(root, state) {
     <p style="color:var(--muted);font-size:12px;margin:4px 0 0">
       <span style="color:var(--gold)">●</span> daily &nbsp;
       <span style="color:var(--steel)">—</span> 7-day average &nbsp;
-      ${w.eta_date_iso ? '<span style="color:var(--good)">┄</span> projection to goal' : ''}</p>
+      ${w.projection?.has_data ? '<span style="color:var(--good)">┄</span> fitted trend · shaded 95% band' : w.eta_date_iso ? '<span style="color:var(--good)">┄</span> projection to goal' : ''}</p>
     <div class="chart" id="weight-chart"></div></div>`);
   root.append(chartCard);
   const dates = w.series.map(x => x.date);
@@ -136,7 +144,20 @@ export function renderWeight(root, state) {
       line: { color: CHART.steel, width: 2, shape: 'spline' },
       hovertemplate: '%{x}<br>%{y:.1f} lbs<extra>7-day avg</extra>' },
   ];
-  if (w.eta_date_iso) {
+  if (proj?.has_data) {
+    // The cone: 95% prediction interval, widening with distance. Drawn as
+    // hi (invisible) then lo filled to it, then the fitted mid line.
+    traces.push(
+      { x: proj.dates, y: proj.hi, mode: 'lines', showlegend: false,
+        line: { width: 0 }, hoverinfo: 'skip' },
+      { x: proj.dates, y: proj.lo, mode: 'lines', name: '95% band',
+        line: { width: 0 }, fill: 'tonexty',
+        fillcolor: 'rgba(126,224,129,.10)', hoverinfo: 'skip' },
+      { x: proj.dates, y: proj.mid, mode: 'lines', name: 'Fitted trend',
+        line: { color: CHART.good, width: 1.5, dash: 'dash' },
+        hovertemplate: '%{x}<br>%{y:.1f} lbs<extra>fitted trend</extra>' },
+    );
+  } else if (w.eta_date_iso) {
     traces.push({
       x: [dates[dates.length - 1], w.eta_date_iso], y: [w.current, w.goal],
       mode: 'lines', name: 'Projection',

@@ -2391,6 +2391,44 @@ def test_vessel_preview_tolerates_junk(client):
 
 # ── live sync: an open tab stays current on its own ────────────────────────
 
+def _seed_linear_weights(client, days=36, start=215.0, rate=-0.15):
+    from datetime import date, timedelta
+    for i in range(days):
+        day = (date.today() - timedelta(days=days - 1 - i)).isoformat()
+        client.post("/api/weights", json={"date": day,
+                                          "weight": round(start + rate * i + (0.3 if i % 3 == 0 else -0.2), 1)})
+
+
+def test_projection_cone_fits_the_trend_and_widens(client):
+    """The cone: OLS over the window, 95% band growing with distance."""
+    client.post("/api/profile", json={"weight": 210, "goal_weight": 200})
+    _seed_linear_weights(client)
+    pr = client.get("/api/state").get_json()["stats"]["weight"]["projection"]
+    assert pr["has_data"] is True
+    assert -1.4 < pr["rate_per_week"] < -0.7, "fitted rate must recover the seeded slope"
+    assert (pr["hi"][-1] - pr["lo"][-1]) > (pr["hi"][0] - pr["lo"][0]),         "prediction interval must widen with distance"
+    # ETA is a window, and the window brackets the midpoint
+    assert pr["eta"]["early"] <= pr["eta"]["mid"] <= pr["eta"]["late"]
+    assert len(pr["dates"]) == len(pr["mid"]) == len(pr["lo"]) == len(pr["hi"])
+
+
+def test_projection_refuses_thin_data(client):
+    """Under 8 weigh-ins there is no trend worth projecting — honest silence."""
+    client.post("/api/profile", json={"weight": 210, "goal_weight": 200})
+    _seed_linear_weights(client, days=5)
+    pr = client.get("/api/state").get_json()["stats"]["weight"]["projection"]
+    assert pr["has_data"] is False and "8" in pr["note"]
+
+
+def test_projection_moving_away_projects_but_never_promises(client):
+    """Gaining while the goal is below: draw the cone, name no arrival."""
+    client.post("/api/profile", json={"weight": 210, "goal_weight": 200})
+    _seed_linear_weights(client, rate=+0.15)
+    pr = client.get("/api/state").get_json()["stats"]["weight"]["projection"]
+    assert pr["has_data"] is True
+    assert pr["eta"] == {"mid": None, "early": None, "late": None}
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one
