@@ -340,6 +340,30 @@ export function renderWorkouts(root, state) {
   }
 
   // ── training load & balance ──
+  // ── where you stand: the population ladder ──
+  const ss = state.stats.strength_standards || {};
+  if (ss.has_data) {
+    const stdCard = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">Where you stand</p>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 12px">Best estimated
+        1RM per lift over 90 days, scaled to your ${ss.bodyweight} lb bodyweight.
+        ${esc(ss.caveat)}</p>
+      <div class="std-list"></div></div>`);
+    const stdList = stdCard.querySelector('.std-list');
+    for (const l of ss.lifts) {
+      stdList.append(el(`<div class="std-row">
+        <div class="std-head"><b>${esc(l.lift)}</b>
+          <span class="std-e1">${l.e1rm} lb · ${l.bw_ratio}× bw</span>
+          <span class="std-rank r-${esc(l.rank.toLowerCase())}">${esc(l.rank)}</span></div>
+        <div class="std-bar"><i style="width:${l.progress_pct}%"></i></div>
+        <div class="std-next">${l.next_rank
+          ? `${esc(l.next_rank)} at ${l.next_e1rm} lb — ${Math.max(0, l.next_e1rm - l.e1rm)} lb of 1RM to go`
+          : 'top of the ladder'}</div>
+      </div>`));
+    }
+    root.append(stdCard);
+  }
+
   const mb = state.stats.muscle_balance || { groups: [] };
   const wv = state.stats.weekly_volume || [];
   if (mb.groups.length || wv.some(w => w.volume > 0)) {
