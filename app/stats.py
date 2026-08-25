@@ -1690,6 +1690,28 @@ def tape_change(data, days=None):
     }
 
 
+def _tape_history(tape_rows):
+    rows = tape_rows[-24:]
+    if not rows:
+        return []
+    carry, filled = {}, []
+    for row in rows:
+        for k in VESSEL_SITES:
+            if row.get(k):
+                carry[k] = row[k]
+        filled.append({'date': row['date'], 'tape_in': dict(carry)})
+    later = {}
+    for f in reversed(filled):
+        t = f['tape_in']
+        for k in VESSEL_SITES:
+            if t.get(k):
+                later[k] = t[k]
+            elif later.get(k):
+                t[k] = later[k]
+        f['tape_in'] = {k: t.get(k) for k in VESSEL_SITES}
+    return filled
+
+
 def vessel(data):
     """Everything the VESSEL renderer needs, fully derived. Pure function."""
     p = data.get('profile') or {}
@@ -1737,6 +1759,11 @@ def vessel(data):
         'measured_sites': measured,
         'previous_tape_in': ({k: previous.get(k) for k in VESSEL_SITES}
                              if previous else None),
+        # Every dated tape set (last 24), gaps filled by carrying the
+        # nearest measurement forward then backward — raw data for the time
+        # scrubber, which morphs the figure through its own history. No
+        # derived numbers here; interpolation between sets is presentation.
+        'history': _tape_history(tape_rows),
         # How many rungs of the degradation ladder are lit. Drives opacity.
         'fidelity': ('full' if latest else 'estimated' if height else 'generic'),
     }

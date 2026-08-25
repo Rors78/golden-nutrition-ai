@@ -1037,3 +1037,28 @@ body.lift-open { overflow: hidden; }
 .heat-foot b { color: var(--ink); font-family: var(--font-mono); }
 .heat-scale { display: flex; gap: 3px; align-items: center; margin-left: auto; }
 .heat-scale i { display: inline-block; }
+
+/* -- vessel time scrubber ----------------------------------------------- */
+.vessel-scrub {
+  position: absolute; left: 50%; bottom: 112px; transform: translateX(-50%);
+  width: min(420px, 70%); text-align: center; pointer-events: auto;
+}
+.vessel-scrub .vs-lab {
+  display: block; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+  margin-bottom: 4px;
+}
+.vessel-scrub input[type=range] {
+  /* the generic input rule pads and paints this — flatten every property */
+  width: 100%; appearance: none; -webkit-appearance: none;
+  height: 14px; min-height: 0; padding: 0; margin: 0; border: 0;
+  background: none; outline: none;
+}
+.vessel-scrub input[type=range]::-webkit-slider-runnable-track {
+  height: 3px; border-radius: 2px; background: rgba(143, 227, 242, .22);
+}
+.vessel-scrub input[type=range]::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none; width: 14px; height: 14px;
+  border-radius: 50%; margin-top: -5.5px; background: var(--gold);
+  box-shadow: 0 0 8px rgba(242, 193, 78, .6); cursor: ew-resize;
+}

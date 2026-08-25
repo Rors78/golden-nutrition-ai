@@ -88,6 +88,11 @@ export function renderVessel(root, state) {
         <b class="vh-voy" data-f="voy">—</b><small data-f="eta">—</small></div>
       <div class="vessel-state" data-f="stateTag"></div>
       <div class="vessel-hint" data-f="hint"></div>
+      <div class="vessel-scrub" data-f="scrubBox" hidden>
+        <span class="vs-lab" data-f="scrubLab"></span>
+        <input type="range" min="0" max="1000" value="1000" data-f="scrubIn"
+               aria-label="Scrub through tape history">
+      </div>
       <div class="vessel-change" data-f="changeBox"></div>
     </div>
   </div>`);
@@ -101,6 +106,10 @@ export function renderVessel(root, state) {
   let V = null;                       // the payload; null until first fetch
   let hot = null;                     // ring under the pointer, if any
   let showChange = false;             // change-map overlay on/off
+  let phi = 0.7, phiV = 0;            // orbit angle + fling velocity
+  let lastSpin = 0;                   // when the user last grabbed the body
+  let dragging = false, dragMoved = false, dragX = 0;
+  let scrubU = null;                  // history position; null = live figure
   const D = { kcal: 0, prot: 0, acr: 0, bf: 0 };   // eased display values
 
   function resize() {
@@ -121,34 +130,76 @@ export function renderVessel(root, state) {
     for (let y = (H / 2) % 64; y < H; y += 64) { cx.beginPath(); cx.moveTo(0, y); cx.lineTo(W, y); cx.stroke(); }
   }
 
-  function stack(pts, ox, cxp, ppi, rot, alpha, shellK) {
-    const proj = [];
-    for (const [yi, ri, wg = 1] of pts) {
+  // ── the body in three dimensions ──────────────────────────────────────
+  // The old renderer rotated a texture: meridian alpha tracked sin(theta)
+  // while the geometry never moved, and the limbs sat at fixed offsets. This
+  // one rotates the body. Every point is (x, y, z) in inches, spun about the
+  // spine by `phi`, then projected obliquely: vertical stays vertical, depth
+  // leans in by TILT. A torso ring (centred on the spine) projects to exactly
+  // the ellipse the old code drew, so ringAt() and the change map still land
+  // precisely on the drawn rings at any rotation.
+  const LIGHT_AZ = 2.35;              // where the key light hangs, azimuth
+
+  function project(ox, r, theta, yIn, ppi, cxp) {
+    const wx = ox + r * Math.cos(theta), wz = r * Math.sin(theta);
+    const X = wx * Math.cos(phi) - wz * Math.sin(phi);
+    const Z = wx * Math.sin(phi) + wz * Math.cos(phi);
+    return [cxp + X * ppi, yIn * ppi + Z * TILT * ppi, Z];
+  }
+
+  // Lit, not glowing: a Lambert key light plus a rim on the facing side.
+  // Depth is legible because brightness follows the surface, not the frame.
+  function shade(theta, wg, alpha) {
+    const a = theta + phi;
+    const lam = Math.max(0, Math.cos(a - LIGHT_AZ));
+    const rim = Math.pow(Math.max(0, Math.sin(a)), 2);
+    return (0.05 + 0.24 * lam + 0.15 * rim) * wg * alpha;
+  }
+
+  function drawPart(part, ox, cxp, ppi, alpha, shellK, P) {
+    const rings = [];
+    for (const [yi, ri, wg = 1] of part) {
       if (!ri) continue;
-      const py = yi * ppi, rp = ri * ppi;
+      const pts = [];
+      for (let k = 0; k <= P; k += 1) {
+        const th = k / P * TAU;
+        pts.push([...project(ox, ri, th, yi, ppi, cxp), th]);
+      }
+      rings.push({ pts, wg });
+      for (let k = 0; k < P; k += 1) {
+        const a = shade(pts[k][3], wg, alpha);
+        if (a < 0.015) continue;
+        cx.beginPath();
+        cx.moveTo(pts[k][0], pts[k][1]);
+        cx.lineTo(pts[k + 1][0], pts[k + 1][1]);
+        cx.strokeStyle = `rgba(143,227,242,${a})`;
+        cx.lineWidth = 0.75 * wg + 0.3 + (pts[k][2] > 0 ? 0.3 : 0);
+        cx.stroke();
+      }
       if (shellK > 0.001) {
         cx.beginPath();
-        cx.ellipse(cxp + ox, py, rp * (1 + shellK), rp * (1 + shellK) * TILT, 0, 0, TAU);
+        for (let k = 0; k <= P; k += 1) {
+          const th = k / P * TAU;
+          const [x2, y2] = project(ox, ri * (1 + shellK), th, yi, ppi, cxp);
+          k ? cx.lineTo(x2, y2) : cx.moveTo(x2, y2);
+        }
         cx.strokeStyle = `rgba(143,227,242,${0.05 * wg * alpha})`;
         cx.lineWidth = 1; cx.stroke();
       }
-      cx.beginPath();
-      cx.ellipse(cxp + ox, py, rp, rp * TILT, 0, 0, TAU);
-      cx.strokeStyle = `rgba(143,227,242,${(0.3 * wg + 0.1) * alpha})`;
-      cx.lineWidth = 0.9 * wg + 0.35; cx.stroke();
-      proj.push({ py, rp });
     }
-    const N = W < 820 ? 10 : 22;
-    for (let m = 0; m < N; m++) {
-      const a = rot + m / N * TAU, front = Math.sin(a);
-      if (front < -0.35) continue;
-      const al = Math.min(1, Math.max(0, (front + 0.35) / 1.35));
+    // meridians: strands down the body at fixed theta, lit per strand
+    const M = W < 820 ? 10 : 18;
+    for (let m = 0; m < M; m += 1) {
+      const th = m / M * TAU;
+      const a = shade(th, 0.8, alpha) * 0.9;
+      if (a < 0.02) continue;
       cx.beginPath();
-      proj.forEach((p, i) => {
-        const x = cxp + ox + Math.cos(a) * p.rp, y = p.py + Math.sin(a) * p.rp * TILT;
-        i ? cx.lineTo(x, y) : cx.moveTo(x, y);
+      rings.forEach((rg, i) => {
+        const k = Math.round(th / TAU * (rg.pts.length - 1));
+        const [x2, y2] = rg.pts[k];
+        i ? cx.lineTo(x2, y2) : cx.moveTo(x2, y2);
       });
-      cx.strokeStyle = `rgba(143,227,242,${(0.028 + 0.12 * al) * alpha})`;
+      cx.strokeStyle = `rgba(143,227,242,${a})`;
       cx.lineWidth = 0.65; cx.stroke();
     }
   }
@@ -178,17 +229,41 @@ export function renderVessel(root, state) {
     return best;
   }
 
+  // The tape the frame is drawn from: live, or a blend of two dated sets
+  // while the scrubber is held somewhere in the past.
+  function tapeForFrame() {
+    const h = V.body.history || [];
+    if (scrubU === null || h.length < 2) return V.body.tape_in || {};
+    const i = Math.min(Math.floor(scrubU), h.length - 2);
+    const f = scrubU - i;
+    const a = h[i].tape_in, b = h[i + 1].tape_in;
+    const out = {};
+    for (const k of Object.keys(V.body.tape_in || {})) {
+      const va = a[k], vb = b[k];
+      out[k] = (va != null && vb != null) ? va + (vb - va) * f
+        : (vb ?? va ?? (V.body.tape_in || {})[k]);
+    }
+    return out;
+  }
+
   function figure(t) {
     const b = V.body;
-    const sl = slices(b.tape_in || {}, reduced ? 1 : 1 + 0.014 * Math.sin(t * 1.55));
+    const scrubbing = scrubU !== null;
+    const sl = slices(tapeForFrame(),
+      (reduced || scrubbing) ? 1 : 1 + 0.014 * Math.sin(t * 1.55));
     if (!sl) return;
     // Opacity IS the degradation ladder: a generic figure must not look like
     // a measured one.
     const alpha = b.fidelity === 'full' ? 1 : b.fidelity === 'estimated' ? 0.65 : 0.45;
-    // Scale to fill the frame vertically; the figure is the primary object,
-    // not a diagram sitting in the middle of one.
     const { ppi, cxp, top } = geom();
-    const rot = reduced ? 0.7 : t * 0.30;
+
+    // orbit: a fling decays, then the idle spin resumes after a beat
+    if (!reduced) {
+      phi += phiV;
+      phiV *= 0.94;
+      if (!dragging && performance.now() - lastSpin > 3500) phi += 0.0045;
+    }
+
     const shellK = V.composition.have
       ? Math.min(1, Math.max(0, (V.composition.bf_pct - 8) / 27)) * 0.20 : 0;
 
@@ -196,36 +271,35 @@ export function renderVessel(root, state) {
     cx.translate(0, top);
     cx.globalCompositeOperation = 'lighter';
     for (const side of [-1, 1]) {
-      stack(sl.leg, side * sl.hipR * ppi * 0.46, cxp, ppi, rot, alpha * 0.72, shellK * 0.8);
-      stack(sl.arm, side * sl.shoulderR * ppi * 0.98, cxp, ppi, rot, alpha * 0.62, shellK * 0.7);
+      drawPart(sl.leg, side * sl.hipR * 0.46, cxp, ppi, alpha * 0.8, shellK * 0.8, 18);
+      drawPart(sl.arm, side * sl.shoulderR * 0.98, cxp, ppi, alpha * 0.72, shellK * 0.7, 16);
     }
-    stack(sl.torso, 0, cxp, ppi, rot, alpha, shellK);
+    drawPart(sl.torso, 0, cxp, ppi, alpha, shellK, 26);
 
     // ── change map: heat on the sites that actually moved ──
-    if (showChange && V.change?.has_data) {
-      for (const s of V.change.sites) {
-        if (!s.significant) continue;
-        const site = RING_SITES.find(r => r.key === s.site);
+    // Suspended while scrubbing: the heat compares two fixed sets, and a
+    // morphing figure underneath it would lie about where the colour sits.
+    if (showChange && V.change?.has_data && !scrubbing) {
+      for (const s2 of V.change.sites) {
+        if (!s2.significant) continue;
+        const site = RING_SITES.find(r => r.key === s2.site);
         if (!site) continue;
-        const c = (b.tape_in || {})[s.site];
+        const c = (b.tape_in || {})[s2.site];
         if (!c) continue;
         const rp = (c / Math.PI / 2) * ppi;
         const py = site.y * ppi;
-        // two passes: a soft halo for presence, a hard ring for the reading
         cx.beginPath();
         cx.ellipse(cxp, py, rp * 1.14, rp * 1.14 * TILT, 0, 0, TAU);
-        cx.strokeStyle = heatColor(s.delta_mm, 0.45);
+        cx.strokeStyle = heatColor(s2.delta_mm, 0.45);
         cx.lineWidth = 9; cx.stroke();
         cx.beginPath();
         cx.ellipse(cxp, py, rp, rp * TILT, 0, 0, TAU);
-        cx.strokeStyle = heatColor(s.delta_mm, 1);
+        cx.strokeStyle = heatColor(s2.delta_mm, 1);
         cx.lineWidth = 2.4; cx.stroke();
       }
     }
 
-    // the ring under the pointer lights up, so the target is legible before
-    // the tap rather than discovered by it
-    if (hot) {
+    if (hot && !scrubbing) {
       const c = (b.tape_in || {})[hot.key];
       const rp = c ? (c / Math.PI / 2) * ppi : 3 * ppi;
       cx.beginPath();
@@ -380,20 +454,46 @@ export function renderVessel(root, state) {
     return [ev.clientX - r.left, ev.clientY - r.top];
   }
 
+  // Grab the body to spin it; a still tap on a ring still logs. The two are
+  // told apart by travel: past 6 px it is a drag and the tap is disarmed.
+  cv.addEventListener('pointerdown', ev => {
+    dragging = true; dragMoved = false; dragX = ev.clientX;
+    lastSpin = performance.now();
+    try { cv.setPointerCapture(ev.pointerId); } catch { /* synthetic pointer */ }
+  });
   cv.addEventListener('pointermove', ev => {
+    if (dragging) {
+      const dx = ev.clientX - dragX;
+      if (Math.abs(dx) > 6) dragMoved = true;
+      if (dragMoved) {
+        dragX = ev.clientX;
+        phi += dx * 0.008;
+        phiV = dx * 0.004;
+        lastSpin = performance.now();
+      }
+      return;
+    }
     const next = ringAt(...pointAt(ev));
     if (next !== hot) {
       hot = next;
-      cv.style.cursor = hot ? 'pointer' : 'default';
-      F.hint.textContent = hot ? `${hot.label} — tap to log` : '';
+      cv.style.cursor = hot ? 'pointer' : 'grab';
+      F.hint.textContent = hot ? `${hot.label} — tap to log · drag to spin` : '';
       F.hint.classList.toggle('show', !!hot);
     }
   });
+  cv.addEventListener('pointerup', () => {
+    dragging = false;
+    lastSpin = performance.now();
+  });
   cv.addEventListener('pointerleave', () => {
-    hot = null; cv.style.cursor = 'default'; F.hint.classList.remove('show');
+    hot = null; dragging = false;
+    cv.style.cursor = 'grab';
+    F.hint.classList.remove('show');
   });
 
   cv.addEventListener('click', async ev => {
+    if (dragMoved) { dragMoved = false; return; }   // that was a spin
+    if (scrubU !== null) return;                    // the past is read-only
     const site = ringAt(...pointAt(ev));
     if (!site) return;
     const current = (V.body.tape_in || {})[site.key];
@@ -417,12 +517,36 @@ export function renderVessel(root, state) {
     } catch (e) { toast(e.message); }
   });
 
-  F.modeBtn.addEventListener('click', () => { showChange = !showChange; });
+  // ── the time scrubber: drag the figure through its own history ────────
+  function wireScrub() {
+    const h = V?.body?.history || [];
+    if (h.length < 2) { F.scrubBox.hidden = true; scrubU = null; return; }
+    F.scrubBox.hidden = false;
+    const n = h.length - 1;
+    const paintLab = () => {
+      if (scrubU === null) {
+        F.scrubLab.textContent = `${h[n].date} — now`;
+      } else {
+        const i = Math.min(Math.floor(scrubU), n - 1);
+        F.scrubLab.textContent = scrubU === i
+          ? h[i].date : `${h[i].date} → ${h[i + 1].date}`;
+      }
+    };
+    F.scrubIn.oninput = () => {
+      const u = F.scrubIn.value / 1000 * n;
+      scrubU = (u >= n - 0.001) ? null : u;
+      paintLab();
+    };
+    paintLab();
+  }
+
+  F.modeBtn.addEventListener('click' , () => { showChange = !showChange; });
 
   // Demo mode injects a payload on State rather than writing to the server,
   // so honour it when present instead of fetching over the top of it.
-  if (state.vessel_demo) V = state.vessel_demo;
-  else api('GET', '/vessel').then(v => { V = v; }).catch(() => {});
+  if (state.vessel_demo) { V = state.vessel_demo; wireScrub(); }
+  else api('GET', '/vessel').then(v => { V = v; wireScrub(); }).catch(() => {});
+  cv.style.cursor = 'grab';
   raf = requestAnimationFrame(frame);
 
   // Stop cleanly when the section is replaced, or the loop outlives its canvas.
