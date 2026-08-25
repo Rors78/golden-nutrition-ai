@@ -24,6 +24,100 @@ def today_summary(data):
     }
 
 
+def _weight_projection(weights, goal):
+    """OLS trend over the last six weeks, projected with an honest cone.
+
+    The old projection drew a straight line from today's weight to the goal
+    at the endpoint rate — false precision from the two noisiest numbers in
+    the file. This fits every point in the window and carries the scatter
+    forward: the 95% prediction interval widens with distance, and the ETA
+    becomes a window ("likely Oct 22 – Nov 19"), not a promise.
+
+    Honest silence: under 8 weigh-ins or 10 days of span there is no trend
+    worth projecting, and the function says so instead of drawing one.
+    """
+    window_start = (date.today() - timedelta(days=42)).isoformat()
+    pts = [w for w in weights if w['date'] >= window_start]
+    if len(pts) < 8:
+        return {'has_data': False,
+                'note': f'{len(pts)}/8 weigh-ins in the last six weeks — '
+                        'the cone needs eight to separate trend from noise.'}
+    d0 = date.fromisoformat(pts[0]['date'])
+    xs = [(date.fromisoformat(w['date']) - d0).days for w in pts]
+    ys = [w['weight'] for w in pts]
+    n = len(xs)
+    span = xs[-1] - xs[0]
+    if span < 10:
+        return {'has_data': False,
+                'note': 'Weigh-ins span under 10 days — too short to project.'}
+
+    xbar = sum(xs) / n
+    ybar = sum(ys) / n
+    sxx = sum((x - xbar) ** 2 for x in xs)
+    slope = sum((x - xbar) * (y - ybar) for x, y in zip(xs, ys)) / sxx
+    intercept = ybar - slope * xbar
+    sse = sum((y - (intercept + slope * x)) ** 2 for x, y in zip(xs, ys))
+    sigma = math.sqrt(sse / (n - 2)) if n > 2 else 0.0
+
+    x_last = xs[-1]
+    toward = bool(goal) and (goal - ys[-1]) != 0 and \
+        ((goal - ys[-1]) < 0) == (slope < 0) and abs(slope) >= 0.007
+    if toward:
+        horizon = min(365, int((goal - (intercept + slope * x_last)) / slope) + 14)
+        horizon = max(28, horizon)
+    else:
+        horizon = 28
+
+    def bounds(t):
+        x0 = x_last + t
+        mid = intercept + slope * x0
+        se = sigma * math.sqrt(1 + 1 / n + (x0 - xbar) ** 2 / sxx)
+        return mid, mid - 1.96 * se, mid + 1.96 * se
+
+    step = max(1, -(-horizon // 40))          # ceil: at most ~40 points
+    ts = list(range(0, horizon + 1, step))
+    if ts[-1] != horizon:
+        ts.append(horizon)
+    dates, mid, lo, hi = [], [], [], []
+    last_date = date.fromisoformat(pts[-1]['date'])
+    for t in ts:
+        m, l, h = bounds(t)
+        dates.append((last_date + timedelta(days=t)).isoformat())
+        mid.append(round(m, 2))
+        lo.append(round(l, 2))
+        hi.append(round(h, 2))
+
+    # ETA window: where each edge of the cone crosses the goal. The
+    # optimistic edge is whichever bound reaches the goal first.
+    eta = {'mid': None, 'early': None, 'late': None}
+    if toward:
+        def crossing(f):
+            prev = f(0)
+            for t in range(1, 366):
+                cur = f(t)
+                if (prev - goal) * (cur - goal) <= 0:
+                    return (last_date + timedelta(days=t)).isoformat()
+                prev = cur
+            return None
+        eta['mid'] = crossing(lambda t: bounds(t)[0])
+        a = crossing(lambda t: bounds(t)[1])
+        b = crossing(lambda t: bounds(t)[2])
+        if a and b:
+            eta['early'], eta['late'] = sorted([a, b])
+        else:
+            eta['early'], eta['late'] = a or b, None
+
+    return {
+        'has_data': True,
+        'dates': dates, 'mid': mid, 'lo': lo, 'hi': hi,
+        'rate_per_week': round(slope * 7, 2),
+        'sigma_day': round(sigma, 2),
+        'n': n, 'window_days': span,
+        'goal': goal or None,
+        'eta': eta,
+    }
+
+
 def weight_stats(data):
     weights = sorted(data.get('weights', []), key=lambda w: w['date'])
     if not weights:
@@ -91,8 +185,11 @@ def weight_stats(data):
                else 'overweight range' if val < 30 else 'obese range')
         bmi = {'value': val, 'category': cat}
 
+    projection = _weight_projection(weights, goal)
+
     return {
         'has_data': True,
+        'projection': projection,
         'current': current,
         'goal': goal,
         'change_7d': change_7d,
