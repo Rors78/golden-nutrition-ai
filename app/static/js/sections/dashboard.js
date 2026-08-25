@@ -371,4 +371,149 @@ export function renderDashboard(root, state) {
 
   two.append(mealsCard, woCard);
   root.append(two);
+
+  // ── the forge card: the log, struck into something you can send ──────
+  const fc = el(`<div class="card" style="margin-top:14px">
+    <p class="chart-title">The forge card</p>
+    <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">Your current
+      numbers — weight, trend, composition, best lift, streak — struck into a
+      single dark-and-gold card. Rendered on this machine; nothing leaves it
+      until you choose to send the picture.</p>
+    <button type="button" class="ghost-btn fc-btn" style="flex:0 1 auto">Forge the card</button>
+    <div class="fc-out" hidden style="margin-top:12px">
+      <img class="fc-img" alt="progress card" style="width:100%;max-width:420px;border-radius:8px;display:block">
+      <div class="form-row" style="margin-top:10px">
+        <a class="gold-btn fc-dl" download="">Download PNG</a>
+        <button type="button" class="ghost-btn fc-close" style="flex:0 1 auto">Close</button>
+      </div>
+    </div>
+  </div>`);
+  fc.querySelector('.fc-btn').addEventListener('click', () => {
+    const url2 = forgeCard(state);
+    fc.querySelector('.fc-img').src = url2;
+    const a = fc.querySelector('.fc-dl');
+    a.href = url2;
+    a.download = `golden-progress-${new Date().toISOString().slice(0, 10)}.png`;
+    fc.querySelector('.fc-out').hidden = false;
+  });
+  fc.querySelector('.fc-close').addEventListener('click', () => {
+    fc.querySelector('.fc-out').hidden = true;
+  });
+  root.append(fc);
+}
+
+// Renders the card on an offscreen canvas and returns a data URL. All
+// colours come from the design tokens so the card matches the app; every
+// block draws only if its data exists — a young log makes a sparse card,
+// not a card full of dashes.
+function forgeCard(state) {
+  const css = getComputedStyle(document.documentElement);
+  const tok = n => css.getPropertyValue(n).trim();
+  const GOLD = tok('--gold') || '#f2c14e', BRIGHT = tok('--gold-bright') || '#ffd875';
+  const BG = tok('--bg') || '#0e1013', INK = tok('--ink') || '#f2f4f6';
+  const MUTED = tok('--muted') || '#6e7683', STEEL = tok('--steel') || '#6ea8d8';
+  const GOOD = tok('--good') || '#7ee081', LINE = tok('--line') || '#272d36';
+  const MONO = '"IBM Plex Mono", ui-monospace, monospace';
+  const BODY = '"Archivo", system-ui, sans-serif';
+
+  const W = 1080, H = 1350;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+
+  g.fillStyle = BG; g.fillRect(0, 0, W, H);
+  g.strokeStyle = 'rgba(143,227,242,.035)'; g.lineWidth = 1;
+  for (let x = 60; x < W; x += 120) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  for (let y = 60; y < H; y += 120) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+
+  // wordmark + plate rings
+  g.strokeStyle = GOLD; g.lineWidth = 6;
+  g.beginPath(); g.arc(110, 110, 40, 0, 7); g.stroke();
+  g.lineWidth = 3; g.beginPath(); g.arc(110, 110, 22, 0, 7); g.stroke();
+  g.fillStyle = INK; g.font = `800 44px ${BODY}`;
+  g.fillText('GOLDEN', 180, 100);
+  g.fillStyle = GOLD; g.fillText('NUTRITION AI', 180, 148);
+  g.fillStyle = MUTED; g.font = `20px ${MONO}`; g.textAlign = 'right';
+  g.fillText(new Date().toISOString().slice(0, 10), W - 70, 110);
+  g.textAlign = 'left';
+
+  const w = state.stats.weight || {};
+  let y = 300;
+  if (w.has_data) {
+    g.fillStyle = MUTED; g.font = `22px ${MONO}`;
+    g.fillText('BODYWEIGHT', 70, y);
+    g.fillStyle = INK; g.font = `800 150px ${BODY}`;
+    g.fillText(`${w.current}`, 62, y + 150);
+    const cw = g.measureText(`${w.current}`).width;
+    g.fillStyle = MUTED; g.font = `700 44px ${BODY}`;
+    g.fillText('lb', 74 + cw, y + 150);
+    if (w.total_change != null) {
+      const down = w.total_change <= 0;
+      g.fillStyle = down ? GOOD : GOLD; g.font = `30px ${MONO}`;
+      g.fillText(`${w.total_change > 0 ? '+' : ''}${w.total_change} lb since ${w.since}`, 70, y + 210);
+    }
+    y += 280;
+    // sparkline of the whole voyage
+    const series = w.series || [];
+    if (series.length > 2) {
+      const x0 = 70, x1 = W - 70, y0 = y, y1 = y + 210;
+      const vals = series.map(p => p.weight);
+      const lo = Math.min(...vals, w.goal || Infinity), hi = Math.max(...vals);
+      const sx = i => x0 + i / (series.length - 1) * (x1 - x0);
+      const sy = v => y1 - (v - lo) / Math.max(hi - lo, 0.1) * (y1 - y0);
+      if (w.goal) {
+        g.strokeStyle = GOOD; g.setLineDash([6, 8]); g.lineWidth = 2;
+        g.beginPath(); g.moveTo(x0, sy(w.goal)); g.lineTo(x1, sy(w.goal)); g.stroke();
+        g.setLineDash([]);
+        g.fillStyle = GOOD; g.font = `20px ${MONO}`; g.textAlign = 'right';
+        g.fillText(`goal ${w.goal}`, x1, sy(w.goal) - 10); g.textAlign = 'left';
+      }
+      g.strokeStyle = GOLD; g.lineWidth = 4; g.beginPath();
+      series.forEach((p, i) => i ? g.lineTo(sx(i), sy(p.weight)) : g.moveTo(sx(i), sy(p.weight)));
+      g.stroke();
+      g.fillStyle = BRIGHT;
+      g.beginPath(); g.arc(sx(series.length - 1), sy(vals[vals.length - 1]), 8, 0, 7); g.fill();
+      y = y1 + 90;
+    }
+  } else {
+    g.fillStyle = MUTED; g.font = `28px ${MONO}`;
+    g.fillText('THE LOG IS YOUNG — THE NUMBERS ARE COMING', 70, y + 60);
+    y += 180;
+  }
+
+  // stat chips: only what exists
+  const chips = [];
+  const bc = state.stats.body_comp || {};
+  if (bc.current != null) chips.push(['BODY FAT', `${bc.current}%`, STEEL]);
+  const heat = state.stats.log_heat || {};
+  if (heat.has_data) chips.push(['STREAK', `${heat.current_streak} days`, GOLD]);
+  if (heat.has_data) chips.push(['DAYS LOGGED', `${heat.days_logged}`, INK]);
+  const ss = state.stats.strength_standards || {};
+  if (ss.has_data && ss.lifts.length) {
+    const best = [...ss.lifts].sort((a, b) => b.bw_ratio - a.bw_ratio)[0];
+    chips.push([best.lift.toUpperCase(), `${best.e1rm} lb · ${best.rank}`, BRIGHT]);
+  }
+  const rd = state.stats.readiness || {};
+  if (rd.has_data) chips.push(['READINESS', `${rd.score}`, GOOD]);
+
+  let cxp = 70;
+  for (const [lab, val, col] of chips.slice(0, 5)) {
+    g.font = `700 34px ${BODY}`;
+    const wch = Math.max(g.measureText(val).width, g.measureText(lab).width * 0.62) + 56;
+    if (cxp + wch > W - 70) { cxp = 70; y += 140; }   // wrap, never drop
+    g.strokeStyle = LINE; g.lineWidth = 2;
+    g.beginPath(); g.roundRect(cxp, y, wch, 118, 14); g.stroke();
+    g.fillStyle = MUTED; g.font = `17px ${MONO}`;
+    g.fillText(lab, cxp + 26, y + 40);
+    g.fillStyle = col; g.font = `700 34px ${BODY}`;
+    g.fillText(val, cxp + 26, y + 88);
+    cxp += wch + 22;
+  }
+
+  g.fillStyle = MUTED; g.font = `22px ${MONO}`;
+  g.fillText('the iron doesn\'t lie. neither does the log.', 70, H - 70);
+  g.strokeStyle = GOLD; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(70, H - 110); g.lineTo(W - 70, H - 110); g.stroke();
+
+  return c.toDataURL('image/png');
 }
