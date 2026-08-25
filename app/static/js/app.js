@@ -249,7 +249,7 @@ const form = document.getElementById('profile-form');
 // data file has actually changed.
 (function initLiveSync() {
   const SLOW = 30000, FAST = 6000;
-  let rev = null, day = null, timer = 0, busy = false;
+  let rev = null, day = null, code = null, timer = 0, busy = false;
 
   // The sentinel computes these and pushes them to a phone. On this machine
   // there is no ntfy topic, so they reach nobody — and a screen that is
@@ -281,6 +281,12 @@ const form = document.getElementById('profile-form');
     busy = true;
     try {
       const p = await api('GET', '/pulse');
+      // A deploy landed: the JS this tab is running is no longer the JS the
+      // server ships. Data-refresh can't fix that — only a reload can, and
+      // waiting for a human to press F5 is how a fix "doesn't work" on a
+      // screen that has been open since before it shipped.
+      if (code !== null && p.code_rev && p.code_rev !== code) { location.reload(); return; }
+      if (p.code_rev) code = p.code_rev;
       // Day rollover: "today" is now a different day, so every today-scoped
       // panel on screen is stale even though no data changed.
       if (day && p.server_date !== day) { day = p.server_date; await refresh(); }
@@ -337,7 +343,10 @@ addEventListener('hashchange', () => {
   if (!link) return;
   const IDLE = 90000, BOOT = 2500;
   let timer = 0;
-  const on = () => localStorage.getItem(KEY) === '1';
+  // Default ON: this install is a display unit until someone says otherwise.
+  // The demo costs nothing (in-memory swap only) and any key or click exits,
+  // so the surprising state is a dead screen, not a running one.
+  const on = () => localStorage.getItem(KEY) !== '0';
 
   function label() {
     link.textContent = `floor model: ${on() ? 'on' : 'off'}`;

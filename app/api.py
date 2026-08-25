@@ -299,6 +299,23 @@ def vessel_preview():
     })
 
 
+# The newest mtime across the frontend's files, computed once at startup.
+# When a deploy lands and the server restarts, every open tab sees this move
+# on its next pulse and reloads itself — code follows the same rule as data:
+# an open screen must not need a human to press F5 to be current.
+def _code_rev():
+    newest = 0
+    root = Path(__file__).parent
+    for sub in ('static', 'templates'):
+        for f in (root / sub).rglob('*'):
+            if f.is_file():
+                newest = max(newest, f.stat().st_mtime)
+    return int(newest * 1000)
+
+
+CODE_REV = _code_rev()
+
+
 @bp.get('/pulse')
 def live_pulse():
     """A cheap 'has anything changed' token, plus what is live right now.
@@ -331,6 +348,7 @@ def live_pulse():
 
     return jsonify({
         'rev': rev,
+        'code_rev': CODE_REV,
         'server_date': today,
         'server_time': datetime.now().strftime('%H:%M'),
         'today': {

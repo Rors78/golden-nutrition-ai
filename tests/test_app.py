@@ -2391,6 +2391,16 @@ def test_vessel_preview_tolerates_junk(client):
 
 # ── live sync: an open tab stays current on its own ────────────────────────
 
+def test_pulse_carries_a_stable_code_rev(client):
+    """code_rev is the deploy token: fixed for a process, moves on restart
+    after files change. Open tabs reload when it moves — so within one
+    process it must never wobble, or every open screen reload-loops."""
+    a = client.get("/api/pulse").get_json()["code_rev"]
+    b = client.get("/api/pulse").get_json()["code_rev"]
+    assert isinstance(a, int) and a > 0
+    assert a == b
+
+
 def test_pulse_rev_moves_only_when_data_changes(client):
     """The client re-fetches state on rev change, so a rev that moves without
     a write would defeat the point of polling something small."""
