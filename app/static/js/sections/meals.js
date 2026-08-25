@@ -29,6 +29,42 @@ export function renderMeals(root, state) {
   );
   root.append(grid);
 
+  // ── the fuel plan: carb-cycled targets, live against today's plate ──
+  const FP = state.stats.fuel_plan || {};
+  if (FP.has_data) {
+    const tt = state.stats.today?.totals || {};
+    const eaten = { kcal: tt.calories || 0, protein: tt.protein || 0,
+                    carbs: tt.carbs || 0, fat: tt.fat || 0 };
+    const bar = (lab, got, want, unit) => {
+      const pct = Math.min(100, want ? got / want * 100 : 0);
+      const over = got > want * 1.05;
+      return `<div class="fp-row">
+        <span class="fp-lab">${lab}</span>
+        <div class="fp-bar"><i style="width:${pct}%" class="${over ? 'over' : ''}"></i></div>
+        <span class="fp-num">${Math.round(got)} / ${want} ${unit}</span></div>`;
+    };
+    const t2 = FP.today;
+    const fpCard = el(`<div class="card" style="margin-top:14px">
+      <p class="chart-title">The fuel plan
+        <span class="fp-badge ${FP.trained_today ? 'train' : ''}">${FP.trained_today ? 'TRAINING DAY' : 'REST DAY'}</span></p>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 10px">
+        ${esc(FP.mode === 'cut' ? `Cutting at ${Math.abs(FP.pace_lb_wk)} lb/week` :
+          FP.mode === 'bulk' ? `Building at ${FP.pace_lb_wk} lb/week` : 'Holding at maintenance')}
+        · ${FP.training_days_per_week} training days/week · maintenance ${FP.maintenance.toLocaleString()} kcal
+        (${esc(FP.source)}). ${esc(FP.today_note)}.</p>
+      ${bar('kcal', eaten.kcal, t2.kcal, '')}
+      ${bar('protein', eaten.protein, t2.protein, 'g')}
+      ${bar('carbs', eaten.carbs, t2.carbs, 'g')}
+      ${bar('fat', eaten.fat, t2.fat, 'g')}
+      <div class="fp-split">
+        <span>training day&nbsp; <b>${FP.training_day.kcal.toLocaleString()}</b> kcal ·
+          ${FP.training_day.protein}p / ${FP.training_day.carbs}c / ${FP.training_day.fat}f</span>
+        <span>rest day&nbsp; <b>${FP.rest_day.kcal.toLocaleString()}</b> kcal ·
+          ${FP.rest_day.protein}p / ${FP.rest_day.carbs}c / ${FP.rest_day.fat}f</span>
+      </div></div>`);
+    root.append(fpCard);
+  }
+
   // calorie-source split: protein / carbs / fat
   const pCal = totals.protein * 4, cCal = totals.carbs * 4, fCal = totals.fat * 9;
   const sumCal = pCal + cCal + fCal;

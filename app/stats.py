@@ -535,6 +535,90 @@ def log_heat(data, days=182):
             'days_logged': logged, 'total_days': days}
 
 
+def fuel_plan(data):
+    """Carb-cycled daily targets: training days eat more, rest days carry
+    the deficit, the week still lands on the goal pace.
+
+    Maintenance comes from the adaptive TDEE when it has earned the right
+    to speak; otherwise a flat 15 kcal/lb estimate that says it is one.
+    Protein is pinned (1 g/lb of the goal weight when cutting, current
+    weight otherwise), fat keeps a 0.3 g/lb floor, carbs take the rest —
+    which is exactly what makes training days carbier: the extra calories
+    arrive as carbohydrate, not as licence.
+
+    Deterministic and computed fresh on every read — never stored, so a
+    new weigh-in or a finished block moves the numbers by itself.
+    """
+    weights = sorted(data.get('weights', []), key=lambda w: w['date'])
+    bw = weights[-1]['weight'] if weights else (data['profile'].get('weight') or 0)
+    if not bw:
+        return {'has_data': False,
+                'note': 'Log a weigh-in — every target scales from bodyweight.'}
+
+    energy = energy_balance(data)
+    if energy.get('has_data'):
+        maintenance = energy['tdee']
+        source = 'adaptive TDEE (your own intake vs your own scale)'
+    else:
+        maintenance = int(round(bw * 15 / 25) * 25)
+        source = 'rough 15 kcal/lb estimate — two weeks of full logging replaces it'
+
+    goal = data['profile'].get('goal_weight') or 0
+    cutting = bool(goal) and goal < bw - 1
+    bulking = bool(goal) and goal > bw + 1
+    # Weekly pace: 0.75% of bodyweight down, 0.25% up, capped at 1.5 lb/wk.
+    pace = (-min(0.0075 * bw, 1.5) if cutting else
+            min(0.0025 * bw, 0.5) if bulking else 0.0)
+    daily_delta = pace * 3500 / 7
+
+    prog = data.get('program')
+    t_days = (prog or {}).get('days_per_week') or 0
+    if not t_days:
+        # infer from the log: training days per week over the last 28 days
+        cutoff = (date.today() - timedelta(days=28)).isoformat()
+        days_trained = {w['date'] for w in data.get('workouts', [])
+                        if w.get('date', '') >= cutoff}
+        t_days = min(6, max(0, round(len(days_trained) / 4)))
+    t_days = t_days or 3          # a plan needs a shape; three is the default week
+
+    # Training days give back 30% of the deficit (or take 60% of a surplus);
+    # rest days absorb the difference so the week still sums to pace.
+    if daily_delta < 0:
+        train_delta = daily_delta * 0.7
+    else:
+        train_delta = daily_delta * 1.6
+    rest_delta = (daily_delta * 7 - train_delta * t_days) / (7 - t_days)         if t_days < 7 else train_delta
+    # Safety floor: no day below 60% of maintenance.
+    floor = maintenance * 0.6
+
+    protein = int(round((goal if cutting and goal else bw) * 1.0 / 5) * 5)
+
+    def day(delta, fat_g_lb):
+        kcal = int(round(max(floor, maintenance + delta) / 25) * 25)
+        fat = int(round(bw * fat_g_lb / 5) * 5)
+        carbs = max(50, int(round((kcal - protein * 4 - fat * 9) / 4 / 5) * 5))
+        return {'kcal': kcal, 'protein': protein, 'carbs': carbs, 'fat': fat}
+
+    training = day(train_delta, 0.30)
+    rest = day(rest_delta, 0.35)
+
+    today = date.today().isoformat()
+    trained_today = any(w.get('date') == today for w in data.get('workouts', []))
+    return {
+        'has_data': True,
+        'maintenance': maintenance, 'source': source,
+        'pace_lb_wk': round(pace, 2),
+        'mode': 'cut' if cutting else 'bulk' if bulking else 'maintain',
+        'training_days_per_week': t_days,
+        'training_day': training, 'rest_day': rest,
+        'trained_today': trained_today,
+        'today': training if trained_today else rest,
+        'today_note': ('training day — the extra arrives as carbs'
+                       if trained_today else
+                       'rest day so far — log a workout and today becomes a training day'),
+    }
+
+
 def auto_regulation(data):
     """Today's load adjustment, derived from readiness and the ACWR corridor.
 
