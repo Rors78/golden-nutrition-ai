@@ -2725,6 +2725,47 @@ def test_fuel_plan_honest_silence_and_estimate_label(client):
     assert fp["mode"] == "maintain" and fp["pace_lb_wk"] == 0
 
 
+def test_week_in_iron_grades_a_strong_week(client):
+    from datetime import date, timedelta
+    client.post("/api/profile", json={"weight": 200, "goal_weight": 185})
+    client.post("/api/program", json={"days": 4})
+    for i in range(14):
+        day = (date.today() - timedelta(days=13 - i)).isoformat()
+        # losing ~1.5 lb/wk, exactly the cut pace the fuel plan targets
+        client.post("/api/weights", json={"date": day, "weight": round(203 - i * 0.215, 1)})
+        if i >= 7:
+            client.post("/api/meals", json={"date": day, "name": "Plate",
+                                            "protein": 190, "calories": 1900})
+    for i in (0, 2, 4, 6):
+        client.post("/api/workouts", json={
+            "date": (date.today() - timedelta(days=i)).isoformat(),
+            "name": "Lift", "duration": 60,
+            "exercises": [{"exercise": "Back Squat", "sets": 3, "reps": 5, "weight": 225}]})
+    wi = client.get("/api/state").get_json()["stats"]["week_in_iron"]
+    assert wi["has_data"] is True
+    by = {c["key"]: c for c in wi["columns"]}
+    assert by["logging"]["pts"] == 25
+    assert by["sessions"]["pts"] == 25 and wi["sessions_done"] == 4
+    assert by["protein"]["pts"] == 25, "190g every day beats 90% of the pinned 185g"
+    assert by["pace"]["pts"] >= 18, "on-pace week scores most of the pace column"
+    assert wi["score"] == sum(c["pts"] for c in wi["columns"])
+    assert wi["score"] >= 90
+
+
+def test_week_in_iron_honest_notes_and_silence(client):
+    wi = client.get("/api/state").get_json()["stats"]["week_in_iron"]
+    assert wi["has_data"] is False
+    # one lonely weigh-in: the card appears but pace names what it needs
+    client.post("/api/weights", json={"weight": 200})
+    wi = client.get("/api/state").get_json()["stats"]["week_in_iron"]
+    assert wi["has_data"] is True
+    by = {c["key"]: c for c in wi["columns"]}
+    assert by["pace"]["pts"] == 0 and "weigh-ins" in by["pace"]["note"]
+    # one weigh-in arms the fuel plan, which pins protein at 1 g/lb — the
+    # note must name the real target it graded against
+    assert "200 g" in by["protein"]["note"] and by["protein"]["pts"] == 0
+
+
 def test_pulse_carries_a_stable_code_rev(client):
     """code_rev is the deploy token: fixed for a process, moves on restart
     after files change. Open tabs reload when it moves — so within one
